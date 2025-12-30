@@ -251,6 +251,11 @@ def parse_args():
         type=int,
         default=12345
     )
+    parser.add_argument(
+        "--num_iter",
+        type=int,
+        default=100
+    )
     return parser.parse_args()
 
 
@@ -289,7 +294,7 @@ if __name__ == "__main__":
         tft_noise=0.00,
     )
 
-    for t in range(50):
+    for t in range(args.num_iter):
         model.step()
         # quick metrics
         avg_payoff = sum(a.payoff for a in model.agents) / len(model.agents)
