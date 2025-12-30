@@ -53,12 +53,12 @@ class IPDAgent(Agent):
         self.node = node
 
         # history[other_node] = list of {step, self_action, other_action}
-        self.history: Dict[int, List[Dict]] = defaultdict(list)
+        self.history = defaultdict(list)
 
         # decisions[other_node] = action for THIS step only
-        self.decisions: Dict[int, str] = {}
+        self.decisions = {}
 
-        self.payoff: float = 0.0
+        self.wealth = 0.0
 
     def record_interaction(
         self,
@@ -101,7 +101,6 @@ class TitForTatAgent(IPDAgent):
         if not h:
             return random.choice(["C", "D"])
 
-        # noise / tremble
         if random.random() < self.noise:
             return random.choice(["C", "D"])
 
@@ -114,8 +113,8 @@ class LLMPDAgent(IPDAgent):
     def __init__(self, model: Model, node: int, persona: Optional[str] = None):
         super().__init__(model, node)
         self.persona = persona or (
-            "You are cautious but fair: reciprocate cooperation, punish defection, "
-            "and occasionally forgive to restore cooperation."
+            "You are cautious but fair: reciprocate cooperation, punish "
+            "defection, and occasionally forgive to restore cooperation."
         )
 
     def decide_against(self, other: IPDAgent) -> str:
@@ -166,11 +165,14 @@ class IPDModel(Model):
 
         self.datacollector = DataCollector(
             model_reporters={
-                "avg_payoff": lambda m: sum(a.payoff for a in m.agents) / len(m.agents),
+                "avg_payoff":
+                    lambda m: sum(a.wealth for a in m.agents) / len(m.agents),
                 "coop_rate": self._coop_rate,
-                "avg_degree": lambda m: (sum(dict(m.graph.degree()).values()) / m.graph.number_of_nodes())
-                if m.graph.number_of_nodes()
-                else 0.0,
+                "avg_degree":
+                    lambda m: (sum(dict(m.graph.degree()).values()) /
+                        m.graph.number_of_nodes())
+                    if m.graph.number_of_nodes()
+                    else 0.0,
             }
         )
 
@@ -201,13 +203,12 @@ class IPDModel(Model):
             ai = self.node_to_agent[i]
             aj = self.node_to_agent[j]
 
-            # Both directions should exist because both agents consider neighbors
             a_i = ai.decisions[j]
             a_j = aj.decisions[i]
 
             p_i, p_j = self.payoff_matrix[(a_i, a_j)]
-            ai.payoff += p_i
-            aj.payoff += p_j
+            ai.wealth += p_i
+            aj.wealth += p_j
 
             ai.record_interaction(step=step_idx, other_node=j, self_action=a_i, other_action=a_j)
             aj.record_interaction(step=step_idx, other_node=i, self_action=a_j, other_action=a_i)
