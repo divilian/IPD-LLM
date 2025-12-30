@@ -16,30 +16,15 @@ Run:
 from __future__ import annotations
 
 import random
+import argparse
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Tuple, Optional
 
 import networkx as nx
 from mesa import Agent, Model
 from mesa.datacollection import DataCollector
 
 
-# ------------------------------------------------------------
-# Payoff matrix.
-# To be a valid prisoner's dilemma, T > R > P > S.
-# Also, to avoid alternating exploitation, 2R > T + S.
-# ------------------------------------------------------------
-T = 5   # Temptation to defect
-R = 3   # Reward for cooperating
-P = 1   # Punishment for mutual defection
-S = 0   # Sucker's payoff
-
-PAYOFFS = {
-    ("C", "C"): (R, R),
-    ("C", "D"): (S, T),
-    ("D", "C"): (T, S),
-    ("D", "D"): (P, P),
-}
 
 
 def llm_decision(
@@ -155,7 +140,8 @@ class IPDModel(Model):
 
     def __init__(
         self,
-        n_agents: int = 100,
+        N, # num agents
+        payoff_matrix: List[Tuple],
         edge_prob: float = 0.05,
         fraction_llm: float = 0.25,
         seed: Optional[int] = None,
@@ -163,8 +149,10 @@ class IPDModel(Model):
     ):
         super().__init__(seed=seed)  # Mesa 3.x: required, seed supported
 
-        # Create ER graph
-        self.graph = nx.erdos_renyi_graph(n_agents, edge_prob, seed=seed)
+        self.N = N
+        self.payoff_matrix = payoff_matrix
+
+        self.graph = nx.erdos_renyi_graph(N, edge_prob, seed=seed)
 
         # Create agents, one per node (store mapping for fast lookup)
         self.node_to_agent: Dict[int, IPDAgent] = {}
@@ -217,7 +205,7 @@ class IPDModel(Model):
             a_i = ai.decisions[j]
             a_j = aj.decisions[i]
 
-            p_i, p_j = PAYOFFS[(a_i, a_j)]
+            p_i, p_j = self.payoff_matrix[(a_i, a_j)]
             ai.payoff += p_i
             aj.payoff += p_j
 
@@ -228,13 +216,73 @@ class IPDModel(Model):
         self.datacollector.collect(self)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Iterated Prisoner's Dilemma on a graph."
+    )
+    parser.add_argument(
+        "T",
+        type=float,
+        help="Temptation to defect"
+    )
+    parser.add_argument(
+        "R",
+        type=float,
+        help="Reward for cooperating"
+    )
+    parser.add_argument(
+        "P",
+        type=float,
+        help="Punishment for mutual defection"
+    )
+    parser.add_argument(
+        "S",
+        type=float,
+        help="Sucker's payoff"
+    )
+    parser.add_argument(
+        "N",
+        type=int,
+        help="Number of agents"
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=12345
+    )
+    return parser.parse_args()
+
+
 # ------------------------------------------------------------
 # Demo run
 # ------------------------------------------------------------
 if __name__ == "__main__":
+
+    args = parse_args()
+    assert (
+        args.T > args.R > args.P > args.S
+    ), "Prisoner's dilemma constraint #1 violated (T>R>P>S)."
+    assert (
+        2*args.R > args.S + args.T
+    ), "Prisoner's dilemma constraint #2 violated (2R>T+S)."
+        
+
+    # ------------------------------------------------------------
+    # Payoff matrix.
+    # To be a valid prisoner's dilemma, T > R > P > S.
+    # Also, to avoid alternating exploitation, 2R > T + S.
+    # ------------------------------------------------------------
+    payoff_matrix = {
+        ("C", "C"): (args.R, args.R),
+        ("C", "D"): (args.S, args.T),
+        ("D", "C"): (args.T, args.S),
+        ("D", "D"): (args.P, args.P),
+    }
+
     model = IPDModel(
-        n_agents=20,
+        N=args.N,
         edge_prob=0.05,
+        payoff_matrix=payoff_matrix,
         fraction_llm=0.0,
         seed=123,
         tft_noise=0.00,
