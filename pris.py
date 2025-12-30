@@ -287,7 +287,7 @@ if __name__ == "__main__":
 
     model = IPDModel(
         N=args.N,
-        edge_prob=0.05,
+        edge_prob=0.2,
         payoff_matrix=payoff_matrix,
         fraction_llm=0.0,
         seed=123,
