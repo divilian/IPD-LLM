@@ -15,15 +15,18 @@ Run:
 
 from __future__ import annotations
 
+import time
 import random
 import argparse
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional
 
+import matplotlib.pyplot as plt
+from matplotlib.cm import get_cmap, ScalarMappable
+from matplotlib.colors import Normalize
 import networkx as nx
 from mesa import Agent, Model
 from mesa.datacollection import DataCollector
-
 
 
 
@@ -294,10 +297,39 @@ if __name__ == "__main__":
         tft_noise=0.00,
     )
 
+    # Graph plotting stuff.
+    pos = nx.spring_layout(model.graph, seed=args.seed, k=1.2)
+    cmap = get_cmap("coolwarm")  # blue->white->red
+    fig, ax = plt.subplots()
+    ax.set_axis_off()
+    norm = Normalize(vmin=0, vmax=100, clip=True)
+    sm = ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    plt.colorbar(sm, label="wealth", ax=ax)
+    plt.tight_layout()
+
     for t in range(args.num_iter):
         model.step()
-        # quick metrics
-        avg_payoff = sum(a.payoff for a in model.agents) / len(model.agents)
+        monies = [model.node_to_agent[i].wealth for i in range(model.N)]
+
+        ax.clear()
+        nx.draw_networkx_edges(
+            model.graph,
+            pos=pos,
+            edge_color="black",
+            width=1.0,
+            ax=ax
+        )
+        nx.draw_networkx_nodes(
+            model.graph,
+            pos=pos,
+            node_color= [cmap(norm(m)) for m in monies],
+            node_size=350,
+            ax=ax)
+        plt.show(block=False)
+        plt.pause(0.001)
+        time.sleep(.2)
+        avg_payoff = sum(a.wealth for a in model.agents) / len(model.agents)
         coop_rate = model._coop_rate()
         print(f"Step {t+1:02d} | avg_payoff={avg_payoff:.2f} | coop_rate={coop_rate:.2f}")
 
