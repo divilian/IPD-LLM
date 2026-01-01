@@ -344,7 +344,7 @@ def parse_args():
         default=12345
     )
     parser.add_argument(
-        "--num_iter",
+        "--num-iter",
         type=int,
         default=100
     )
