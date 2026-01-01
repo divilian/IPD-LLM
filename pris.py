@@ -285,8 +285,18 @@ class IPDModel(Model):
             ai.wealth += p_i
             aj.wealth += p_j
 
-            ai.record_interaction(step=step_idx, other_node=j, self_action=a_i, other_action=a_j)
-            aj.record_interaction(step=step_idx, other_node=i, self_action=a_j, other_action=a_i)
+            ai.record_interaction(
+                step=self.steps,
+                other_node=j,
+                self_action=a_i,
+                other_action=a_j,
+            )
+            aj.record_interaction(
+                step=self.steps,
+                other_node=i,
+                self_action=a_j,
+                other_action=a_i,
+            )
 
         # 3) Collect data
         self.datacollector.collect(self)
