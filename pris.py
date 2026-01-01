@@ -81,6 +81,9 @@ class IPDAgent(Agent):
     def decide_against(self, other: "IPDAgent") -> str:
         raise NotImplementedError
 
+    def shape(self) -> str:
+        raise NotImplementedError
+
     def step(self) -> None:
         """
         Decide actions for all neighbors (per-neighbor decision making).
@@ -90,6 +93,32 @@ class IPDAgent(Agent):
         for nbr in self.model.graph.neighbors(self.node):
             other = self.model.node_to_agent[nbr]
             self.decisions[nbr] = self.decide_against(other)
+
+
+class SuckerAgent(IPDAgent):
+    """Always cooperates."""
+
+    def __init__(self, model: Model, node: int):
+        super().__init__(model, node)
+
+    def decide_against(self, other: IPDAgent) -> str:
+        return "C"
+
+    def shape(self) -> str:
+        return "o"   # Circle = "soft/friendly/harmless" vibe
+
+
+class MeanAgent(IPDAgent):
+    """Always defects."""
+
+    def __init__(self, model: Model, node: int):
+        super().__init__(model, node)
+
+    def decide_against(self, other: IPDAgent) -> str:
+        return "D"
+
+    def shape(self) -> str:
+        return "v"   # Down triangle = "mean/aggressive"
 
 
 class TitForTatAgent(IPDAgent):
@@ -108,6 +137,9 @@ class TitForTatAgent(IPDAgent):
             return random.choice(["C", "D"])
 
         return h[-1]["other_action"]
+
+    def shape(self) -> str:
+        return "s"   # Square = "rule-based/fair/predictable"
 
 
 class LLMPDAgent(IPDAgent):
@@ -129,10 +161,11 @@ class LLMPDAgent(IPDAgent):
             step=self.model.steps,  # Mesa 3.x counter (auto-managed)
         )
 
+    def shape(self) -> str:
+        return "h"   # Hexagon = "tech/engineered/complex"
 
-# ------------------------------------------------------------
-# Model
-# ------------------------------------------------------------
+
+
 class IPDModel(Model):
     """
     Iterated Prisoner's Dilemma on a static Erdős–Rényi graph, Mesa 3.x style.
