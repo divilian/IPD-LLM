@@ -351,6 +351,17 @@ def parse_args():
     return parser.parse_args()
 
 
+
+def estimate_max():
+    """
+    Completely back-of-the-envelope estimate of "about how much should each
+    agent expect to win during this situation?" The crude formula assumes an
+    independent 50/50 chance of choosing to defect or cooperate.
+    """
+    per_encounter = .25 * (args.R*2) + .5 * (args.T + args.S) + .25 * (args.P)
+    return per_encounter / 2 * args.num_iter
+
+
 # ------------------------------------------------------------
 # Demo run
 # ------------------------------------------------------------
@@ -381,18 +392,18 @@ if __name__ == "__main__":
 
     m = IPDModel(
         N=args.N,
-        edge_prob=0.2,
+        ER_edge_prob=0.2,
         payoff_matrix=payoff_matrix,
         agent_factory=factory,
         seed=123,
     )
 
     # Graph plotting stuff.
-    pos = nx.spring_layout(model.graph, seed=args.seed, k=1.2)
-    cmap = get_cmap("coolwarm")  # blue->white->red
+    pos = nx.spring_layout(m.graph, seed=args.seed, k=1.2)
+    cmap = mpl.colormaps["coolwarm"]  # blue->white->red
     fig, ax = plt.subplots()
     ax.set_axis_off()
-    norm = Normalize(vmin=0, vmax=100, clip=True)
+    norm = Normalize(vmin=0, vmax=estimate_max() * 2, clip=True)
     sm = ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
     plt.colorbar(sm, label="wealth", ax=ax)
