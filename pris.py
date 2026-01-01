@@ -368,13 +368,11 @@ def estimate_max():
 if __name__ == "__main__":
 
     args = parse_args()
-    assert (
-        args.T > args.R > args.P > args.S
-    ), "Prisoner's dilemma constraint #1 violated (T>R>P>S)."
-    assert (
-        2*args.R > args.S + args.T
-    ), "Prisoner's dilemma constraint #2 violated (2R>T+S)."
-        
+    if not args.T > args.R > args.P > args.S:
+        raise "Prisoner's dilemma constraint #1 violated (T>R>P>S)."
+    if not 2*args.R > args.S + args.T:
+        raise "Prisoner's dilemma constraint #2 violated (2R>T+S)."
+
 
     # ------------------------------------------------------------
     # Payoff matrix.
