@@ -16,17 +16,63 @@ Run:
 from __future__ import annotations
 
 import time
-import random
+import math
 import argparse
+import random   # using only Mesa's rng; this is for a type hint
 from collections import defaultdict
-from typing import Dict, List, Tuple, Optional
+from collections.abc import Mapping
+from typing import Dict, List, Tuple, Optional, Type
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
-from matplotlib.cm import get_cmap, ScalarMappable
+import matplotlib as mpl
+from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 import networkx as nx
 from mesa import Agent, Model
 from mesa.datacollection import DataCollector
+
+
+@dataclass(frozen=True, slots=True)
+class AgentFactory:
+    probs: Mapping[Type, float]
+
+    @classmethod
+    def from_cli(
+        cls,
+        tokens: list[str],
+    ) -> "AgentFactory":
+        if not tokens or len(tokens) % 2 != 0:
+            raise ValueError("--agent_fracs must be AGENT FRAC pairs")
+
+        probs: dict[Type, float] = {}
+        it = iter(tokens)
+        for name, frac_str in zip(it, it):
+            frac = float(frac_str)
+            probs[globals()[name + "Agent"]] = frac
+
+        return cls(probs)
+
+    def __post_init__(self) -> None:
+        s = sum(self.probs.values())
+        if not math.isclose(abs(sum(self.probs.values())), 1.0):
+            raise ValueError(f"Probabilities must sum to 1.0, got {s}")
+
+    def sample_class(
+        self,
+        rng: random.Random
+    ) -> Type:
+        classes, weights = zip(*self.probs.items())
+        return rng.choices(classes, weights=weights, k=1)[0]
+
+    def instantiate(self,
+        rng: random.Random,
+        model: mesa.Model,
+        node: int,
+        **kwargs
+    ):
+        cls = self.sample_class(rng=rng)
+        return cls(model, node, **kwargs)
 
 
 
@@ -176,28 +222,25 @@ class IPDModel(Model):
     def __init__(
         self,
         N, # num agents
+        ER_edge_prob: float,
         payoff_matrix: List[Tuple],
-        edge_prob: float = 0.05,
-        fraction_llm: float = 0.25,
-        seed: Optional[int] = None,
-        tft_noise: float = 0.10,
+        agent_factory: AgentFactory,
+        seed: int
     ):
         super().__init__(seed=seed)  # Mesa 3.x: required, seed supported
 
         self.N = N
         self.payoff_matrix = payoff_matrix
 
-        self.graph = nx.erdos_renyi_graph(N, edge_prob, seed=seed)
+        self.graph = nx.erdos_renyi_graph(N, ER_edge_prob, seed=seed)
+        self.agent_factory = agent_factory
 
         # Create agents, one per node (store mapping for fast lookup)
         self.node_to_agent: Dict[int, IPDAgent] = {}
 
         for node in self.graph.nodes:
-            if self.random.random() < fraction_llm:
-                agent: IPDAgent = LLMPDAgent(self, node=node)
-            else:
-                agent = TitForTatAgent(self, node=node, noise=tft_noise)
-            self.node_to_agent[node] = agent
+            self.node_to_agent[node] = self.agent_factory.instantiate(
+                self.random, self, node)
 
         self.datacollector = DataCollector(
             model_reporters={
@@ -229,11 +272,7 @@ class IPDModel(Model):
         2) Resolve each edge once using those dyadic decisions
         3) Record dyadic history + collect data
         """
-        # 1) RandomActivation replacement in Mesa 3.x
         self.agents.shuffle_do("step")
-
-        # 2) Resolve interactions per edge
-        step_idx = self.steps  # Mesa auto-increments this per step call
 
         for i, j in self.graph.edges:
             ai = self.node_to_agent[i]
@@ -283,6 +322,13 @@ def parse_args():
         help="Number of agents"
     )
     parser.add_argument(
+        "--agent-fracs",
+        nargs="+",
+        metavar=("AGENT", "FRAC"),
+        help="Agent mix as pairs: AGENT FRAC AGENT FRAC ...",
+        default=["Sucker", 1.0]
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=12345
@@ -321,13 +367,14 @@ if __name__ == "__main__":
         ("D", "D"): (args.P, args.P),
     }
 
-    model = IPDModel(
+    factory = AgentFactory.from_cli(args.agent_fracs)
+
+    m = IPDModel(
         N=args.N,
         edge_prob=0.2,
         payoff_matrix=payoff_matrix,
-        fraction_llm=0.0,
+        agent_factory=factory,
         seed=123,
-        tft_noise=0.00,
     )
 
     # Graph plotting stuff.
@@ -342,27 +389,35 @@ if __name__ == "__main__":
     plt.tight_layout()
 
     for t in range(args.num_iter):
-        model.step()
-        monies = [model.node_to_agent[i].wealth for i in range(model.N)]
+        m.step()
+        monies = [m.node_to_agent[i].wealth for i in range(m.N)]
 
         ax.clear()
         nx.draw_networkx_edges(
-            model.graph,
+            m.graph,
             pos=pos,
             edge_color="black",
             width=1.0,
             ax=ax
         )
-        nx.draw_networkx_nodes(
-            model.graph,
-            pos=pos,
-            node_color= [cmap(norm(m)) for m in monies],
-            node_size=350,
-            ax=ax)
+        nodes = list(m.graph.nodes())
+        colors = [cmap(norm(w)) for w in monies]
+        shapes = [m.node_to_agent[i].shape() for i in nodes]
+        for shape in set(shapes):
+            idx = [i for i, s in enumerate(shapes) if s == shape]
+            nx.draw_networkx_nodes(
+                m.graph,
+                pos=pos,
+                nodelist=[nodes[i] for i in idx],
+                node_color=[colors[i] for i in idx],
+                node_shape=shape,
+                node_size=350,
+                ax=ax,
+            )
         plt.show(block=False)
         plt.pause(0.001)
         time.sleep(.2)
-        avg_payoff = sum(a.wealth for a in model.agents) / len(model.agents)
-        coop_rate = model._coop_rate()
+        avg_payoff = sum(a.wealth for a in m.agents) / len(m.agents)
+        coop_rate = m._coop_rate()
         print(f"Step {t+1:02d} | avg_payoff={avg_payoff:.2f} | coop_rate={coop_rate:.2f}")
 
