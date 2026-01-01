@@ -23,6 +23,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from typing import Dict, List, Tuple, Optional, Type
 from dataclasses import dataclass
+import logging
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -31,6 +32,11 @@ from matplotlib.colors import Normalize
 import networkx as nx
 from mesa import Agent, Model
 from mesa.datacollection import DataCollector
+
+logging.basicConfig(
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,21 +130,30 @@ class IPDAgent(Agent):
             }
         )
 
-    def decide_against(self, other: "IPDAgent") -> str:
+    def decide_against(self, other: "IPDAgent") -> tuple[str, str]:
+        """
+        Make a decision against another agent. Return your decision ("C" or
+        "D") and a description of the interaction (for logging).
+        """
         raise NotImplementedError
 
     def shape(self) -> str:
+        """
+        Return the shape your node should be in the graph. See:
+        https://matplotlib.org/stable/api/markers_api.html.
+        """
         raise NotImplementedError
 
     def step(self) -> None:
         """
-        Decide actions for all neighbors (per-neighbor decision making).
-        Actual payoff resolution is done in the Model.step().
+        Decide your actions for all neighbors (per-neighbor decision making).
+        (Actual payoff resolution is done in the Model.step().)
         """
         self.decisions.clear()
         for nbr in self.model.graph.neighbors(self.node):
             other = self.model.node_to_agent[nbr]
-            self.decisions[nbr] = self.decide_against(other)
+            self.decisions[nbr], desc = self.decide_against(other)
+            logging.info(desc)
 
 
 class SuckerAgent(IPDAgent):
@@ -147,8 +162,10 @@ class SuckerAgent(IPDAgent):
     def __init__(self, model: Model, node: int):
         super().__init__(model, node)
 
-    def decide_against(self, other: IPDAgent) -> str:
-        return "C"
+    def decide_against(self, other: IPDAgent) -> tuple[str, str]:
+        log = f"I'm node {self.node} (Sucker), interacting with {other.node}. "
+        log += "(C'ing as always.)"
+        return "C", log
 
     def shape(self) -> str:
         return "o"   # Circle = "soft/friendly/harmless" vibe
@@ -160,8 +177,10 @@ class MeanAgent(IPDAgent):
     def __init__(self, model: Model, node: int):
         super().__init__(model, node)
 
-    def decide_against(self, other: IPDAgent) -> str:
-        return "D"
+    def decide_against(self, other: IPDAgent) -> tuple[str, str]:
+        log = f"I'm node {self.node} (Mean), interacting with {other.node}. "
+        log += "(D'ing as always.)"
+        return "D", log
 
     def shape(self) -> str:
         return "v"   # Down triangle = "mean/aggressive"
@@ -174,15 +193,22 @@ class TitForTatAgent(IPDAgent):
         super().__init__(model, node)
         self.noise = noise
 
-    def decide_against(self, other: IPDAgent) -> str:
+    def decide_against(self, other: IPDAgent) -> tuple[str, str]:
+        log = f"I'm node {self.node} (TFT), interacting with {other.node}. "
         h = self.history[other.node]
         if not h:
-            return random.choice(["C", "D"])
+            choice = random.choice(["C", "D"])
+            log += f"It's my first time! ({choice})."
+            return choice, log
 
         if random.random() < self.noise:
-            return random.choice(["C", "D"])
+            choice = random.choice(["C", "D"])
+            log += f"I'm going random ({choice})."
+            return choice, log
 
-        return h[-1]["other_action"]
+        log += (f"\n  Last time node {other.node} {h[-1]['other_action']}'d " +
+            f"against me. So I'm {h[-1]['other_action']}'ing them this time.")
+        return h[-1]["other_action"], log
 
     def shape(self) -> str:
         return "s"   # Square = "rule-based/fair/predictable"
