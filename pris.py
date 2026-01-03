@@ -20,8 +20,9 @@ import re
 import time
 import math
 import argparse
+from enum import Enum, auto
 import random   # using only Mesa's rng; this is for a type hint
-from collections import defaultdict
+from collections import defaultdict, Counter
 from collections.abc import Mapping
 from typing import Dict, List, Tuple, Optional, Type
 from dataclasses import dataclass
@@ -43,14 +44,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class SamplingMode(Enum):
+    STOCHASTIC = auto()      # Agents roughly in specified proportions
+    DETERMINISTIC = auto()   # Agents exactly in specified proportions
+
 @dataclass(frozen=True, slots=True)
 class AgentFactory:
     probs: Mapping[Type, float]
+    mode: SamplingMode = SamplingMode.STOCHASTIC
 
     @classmethod
     def from_cli(
         cls,
         tokens: list[str],
+        mode: SamplingMode,
     ) -> "AgentFactory":
         if not tokens or len(tokens) % 2 != 0:
             raise ValueError("--agent_fracs must be AGENT FRAC pairs")
@@ -61,12 +68,43 @@ class AgentFactory:
             frac = float(frac_str)
             probs[globals()[name + "Agent"]] = frac
 
-        return cls(probs)
+        return cls(probs, mode)
 
     def __post_init__(self) -> None:
         s = sum(self.probs.values())
         if not math.isclose(abs(sum(self.probs.values())), 1.0):
             raise ValueError(f"Probabilities must sum to 1.0, got {s}")
+
+    def plan_classes(
+        self,
+        n_agents: int,
+        rng: random.Random,
+    ) -> list[Type]:
+        """
+        Return a list of agent classes of length n_agents.
+        """
+        if self.mode is SamplingMode.STOCHASTIC:
+            classes, weights = zip(*self.probs.items())
+            return rng.choices(classes, weights=weights, k=n_agents)
+        else:
+            plan: list[Type] = []
+
+            counts = {
+                cls: int(round(p * n_agents))
+                for cls, p in self.probs.items()
+            }
+
+            # Fix rounding drift.
+            while sum(counts.values()) != n_agents:
+                diff = n_agents - sum(counts.values())
+                cls = max(self.probs, key=self.probs.get)
+                counts[cls] += diff
+
+            for cls, k in counts.items():
+                plan.extend([cls] * k)
+
+            rng.shuffle(plan)
+            return plan
 
     def sample_class(
         self,
@@ -75,14 +113,20 @@ class AgentFactory:
         classes, weights = zip(*self.probs.items())
         return rng.choices(classes, weights=weights, k=1)[0]
 
-    def instantiate(self,
+    def instantiate_all(
+        self,
         rng: random.Random,
         model: mesa.Model,
-        node: int,
+        nodes: list[int],
         **kwargs
     ):
-        cls = self.sample_class(rng=rng)
-        return cls(model, node, **kwargs)
+        """
+        Given a list of node numbers, generate that many Agent subclasses,
+        according to the probs mapping that this factory was given at
+        instantiation time.
+        """
+        planned = self.plan_classes(len(nodes), rng=rng)
+        return [cls(model, node, **kwargs) for cls, node in zip(planned,nodes)]
 
 
 
@@ -302,14 +346,20 @@ class IPDModel(Model):
         self.payoff_matrix = payoff_matrix
 
         self.graph = nx.erdos_renyi_graph(N, ER_edge_prob, seed=seed)
+        # Shuffle node numbers so that agents are assigned randomly to nodes
+        # (instead of all type A's first, then all type B's, etc.)
+        nodes = list(self.graph.nodes)
+        self.random.shuffle(nodes)
+
         self.agent_factory = agent_factory
 
         # Create agents, one per node (store mapping for fast lookup)
-        self.node_to_agent: Dict[int, IPDAgent] = {}
-
-        for node in self.graph.nodes:
-            self.node_to_agent[node] = self.agent_factory.instantiate(
-                self.random, self, node)
+        agents = self.agent_factory.instantiate_all(
+            rng=self.random,
+            model=self,
+            nodes=nodes,
+        )
+        self.node_to_agent = dict(zip(nodes, agents))
 
         self.datacollector = DataCollector(
             model_reporters={
@@ -370,6 +420,21 @@ class IPDModel(Model):
         # 3) Collect data
         self.datacollector.collect(self)
 
+    def agent_mix(self) -> dict[str, int]:
+        """
+        Return counts of agents by concrete subclass name.
+        """
+        return dict(
+            Counter(agent.__class__.__name__ for agent in self.agents)
+        )
+
+    def __str__(self):
+        ret_val = "with this agent mix:\n"
+        am = [ f"{c:>18}:{n:>5}" for c, n in self.agent_mix().items() ]
+        ret_val += "\n".join(am)
+        ret_val += f"\nThe graph has {self.graph.size()} edges."
+        return ret_val
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -412,6 +477,12 @@ def parse_args():
         choices=["DETERMINISTIC", "STOCHASTIC"],
         default="DETERMINISTIC",
         help="AgentFactory mode: generate *exactly* according to agent-fracs?"
+    )
+    parser.add_argument(
+        "--ER-edge-prob",
+        type=float,
+        default=.1,
+        help="If using Erdős–Rényi graphs, the edge probability."
     )
     parser.add_argument(
         "--seed",
@@ -495,15 +566,16 @@ if __name__ == "__main__":
         ("D", "D"): (args.P, args.P),
     }
 
-    factory = AgentFactory.from_cli(args.agent_fracs)
+    factory = AgentFactory.from_cli(args.agent_fracs, args.af_mode)
 
     m = IPDModel(
         N=args.N,
-        ER_edge_prob=.2,
+        ER_edge_prob=args.ER_edge_prob,
         payoff_matrix=payoff_matrix,
         agent_factory=factory,
         seed=args.seed,
     )
+    print(f"Running {m}")
 
     # Graph plotting stuff.
     if args.plot:
