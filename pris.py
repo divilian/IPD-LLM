@@ -193,6 +193,7 @@ class IPDAgent(Agent):
     def __init__(self, model: Model, node: int):
         super().__init__(model)
         self.node = node
+        self.current_iter_payment = 0
 
         # history[other_node] = list of {step, self_action, other_action}
         self.history = defaultdict(list)
@@ -392,8 +393,14 @@ class IPDModel(Model):
         2) Resolve each edge once using those dyadic decisions
         3) Record dyadic history + collect data
         """
+        # Reset payment totals for this new round.
+        for a in self.agents:
+            a.current_iter_payment = 0.0
+
+        # Tell each agent to make its decision.
         self.agents.shuffle_do("step")
 
+        # Now, for each game that was played, record it and tally its winnings.
         for i, j in self.graph.edges:
             ai = self.node_to_agent[i]
             aj = self.node_to_agent[j]
@@ -402,8 +409,8 @@ class IPDModel(Model):
             a_j = aj.decisions[i]
 
             p_i, p_j = self.payoff_matrix[(a_i, a_j)]
-            ai.wealth += p_i
-            aj.wealth += p_j
+            ai.current_iter_payment += p_i
+            aj.current_iter_payment += p_j
 
             ai.record_interaction(
                 step=self.steps,
@@ -418,7 +425,13 @@ class IPDModel(Model):
                 other_action=a_i,
             )
 
-        # 3) Collect data
+        # Award the winnings, but scale by the node's degree so that
+        # higher-degree nodes don't have an inherent advantage.
+        for a in self.agents:
+            k = self.graph.degree[a.node]
+            if k > 0:
+                a.wealth += a.current_iter_payment / k
+
         self.datacollector.collect(self)
 
     def agent_mix(self) -> dict[str, int]:
@@ -510,10 +523,12 @@ def estimate_expected_avg_wealth(g: Graph):
     Completely back-of-the-envelope estimate of "about how much should each
     agent expect to win during this situation?" The crude formula assumes an
     independent 50/50 chance of choosing to defect or cooperate.
+    Note that we compute "per_iter" here (not "per_encounter") because we're
+    discounting each agent's per-iteration winnings by its degree (which is its
+    number of encounters).
     """
-    per_encounter = .25 * (args.R*2) + .5 * (args.T + args.S) + .25 * (args.P*2)
-    encounters_per_iter = g.size()
-    return per_encounter * encounters_per_iter * args.num_iter / g.order()
+    avg_agent_per_iter = .25 * (args.R + args.T + args.S + args.P)
+    return avg_agent_per_iter * args.num_iter
 
 
 
@@ -586,7 +601,7 @@ if __name__ == "__main__":
         ax.set_axis_off()
         norm = Normalize(
             vmin=0,
-            vmax=estimate_expected_avg_wealth(m.graph) * 2,
+            vmax=estimate_expected_avg_wealth(m.graph),
             clip=True,
         )
         sm = ScalarMappable(norm=norm, cmap=cmap)
@@ -628,7 +643,7 @@ if __name__ == "__main__":
                     ax=ax,
                 )
             plt.title(f"Iteration {t+1} of {args.num_iter}")
-            plt.pause(0.3)
+            plt.pause(0.1)
 
         row = {"step": t + 1}
         row.update(per_agent_type_stats(m))
