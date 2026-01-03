@@ -360,6 +360,7 @@ class IPDModel(Model):
             nodes=nodes,
         )
         self.node_to_agent = dict(zip(nodes, agents))
+        self.agent_to_node = dict(zip(agents, nodes))
 
         self.datacollector = DataCollector(
             model_reporters={
