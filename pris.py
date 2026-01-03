@@ -15,6 +15,7 @@ Run:
 
 from __future__ import annotations
 
+import re
 import time
 import math
 import argparse
@@ -119,7 +120,6 @@ def per_agent_type_stats(
             if agent_counts[cls] > 0
             else 0.0
         )
-
     return row
 
 
@@ -409,7 +409,13 @@ def parse_args():
     parser.add_argument(
         "--seed",
         type=int,
-        default=12345
+        default=12345,
+        help="Seed for all rng's."
+    )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Plot animation."
     )
     parser.add_argument(
         "--num-iter",
@@ -429,6 +435,32 @@ def estimate_expected_avg_wealth(g: Graph):
     per_encounter = .25 * (args.R*2) + .5 * (args.T + args.S) + .25 * (args.P*2)
     encounters_per_iter = g.size()
     return per_encounter * encounters_per_iter * args.num_iter / g.order()
+
+
+
+def print_stats(stats: pl.DataFrame, last_n=20):
+    cols = stats.columns
+
+    things = sorted({
+        re.sub(r"(Coop|\$)$", "", c)
+        for c in cols
+        if c.endswith("Coop") or c.endswith("$")
+    })
+
+    ordered = (
+        [f"{t}Coop" for t in things if f"{t}Coop" in cols] +
+        [f"{t}$"    for t in things if f"{t}$"    in cols]
+    )
+
+    other = [c for c in cols if c not in ordered]
+
+    stats = stats.select(other + ordered)
+
+    stats.tail(last_n).show(
+        limit=None,
+        float_precision=2,
+        tbl_cell_numeric_alignment="RIGHT",
+    )
 
 
 # ------------------------------------------------------------
@@ -484,42 +516,42 @@ if __name__ == "__main__":
         m.step()
         monies = [m.node_to_agent[i].wealth for i in range(m.N)]
 
-        ax.clear()
-        nx.draw_networkx_edges(
-            m.graph,
-            pos=pos,
-            edge_color="black",
-            width=1.0,
-            ax=ax
-        )
-        nx.draw_networkx_labels(
-            m.graph,
-            pos=pos,
-            font_size=10,
-            font_color="black",
-            ax=ax
-        )
-        nodes = list(m.graph.nodes())
-        colors = [cmap(norm(w)) for w in monies]
-        shapes = [m.node_to_agent[i].shape() for i in nodes]
-        for shape in set(shapes):
-            idx = [i for i, s in enumerate(shapes) if s == shape]
-            nx.draw_networkx_nodes(
+        if args.plot:
+            ax.clear()
+            nx.draw_networkx_edges(
                 m.graph,
                 pos=pos,
-                nodelist=[nodes[i] for i in idx],
-                node_color=[colors[i] for i in idx],
-                node_shape=shape,
-                node_size=350,
-                ax=ax,
+                edge_color="black",
+                width=1.0,
+                ax=ax
             )
-        plt.title(f"Iteration {t+1} of {args.num_iter}")
-        plt.pause(0.3)
-        avg_payoff = sum(a.wealth for a in m.agents) / len(m.agents)
-        coop_rate = m._coop_rate()
+            nx.draw_networkx_labels(
+                m.graph,
+                pos=pos,
+                font_size=10,
+                font_color="black",
+                ax=ax
+            )
+            nodes = list(m.graph.nodes())
+            colors = [cmap(norm(w)) for w in monies]
+            shapes = [m.node_to_agent[i].shape() for i in nodes]
+            for shape in set(shapes):
+                idx = [i for i, s in enumerate(shapes) if s == shape]
+                nx.draw_networkx_nodes(
+                    m.graph,
+                    pos=pos,
+                    nodelist=[nodes[i] for i in idx],
+                    node_color=[colors[i] for i in idx],
+                    node_shape=shape,
+                    node_size=350,
+                    ax=ax,
+                )
+            plt.title(f"Iteration {t+1} of {args.num_iter}")
+            plt.pause(0.3)
+
         row = {"step": t + 1}
         row.update(per_agent_type_stats(m))
         stats.append(row)
 
     stats = pl.DataFrame(stats)
-    print(stats)
+    print_stats(stats)
