@@ -15,6 +15,7 @@ Run:
 
 from __future__ import annotations
 
+from tqdm import tqdm
 import re
 import time
 import math
@@ -407,6 +408,12 @@ def parse_args():
         default=["Sucker", 1.0]
     )
     parser.add_argument(
+        "--af_mode",
+        choices=["DETERMINISTIC", "STOCHASTIC"],
+        default="DETERMINISTIC",
+        help="AgentFactory mode: generate *exactly* according to agent-fracs?"
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=12345,
@@ -499,20 +506,21 @@ if __name__ == "__main__":
     )
 
     # Graph plotting stuff.
-    pos = nx.spring_layout(m.graph, seed=args.seed, k=1.2)
-    cmap = mpl.colormaps["coolwarm"]  # blue->white->red
-    fig, ax = plt.subplots(constrained_layout=True)
-    ax.set_axis_off()
-    norm = Normalize(
-        vmin=0,
-        vmax=estimate_expected_avg_wealth(m.graph) * 2,
-        clip=True,
-    )
-    sm = ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    plt.colorbar(sm, label="wealth", ax=ax)
+    if args.plot:
+        pos = nx.spring_layout(m.graph, seed=args.seed, k=1.2)
+        cmap = mpl.colormaps["coolwarm"]  # blue->white->red
+        fig, ax = plt.subplots(constrained_layout=True)
+        ax.set_axis_off()
+        norm = Normalize(
+            vmin=0,
+            vmax=estimate_expected_avg_wealth(m.graph) * 2,
+            clip=True,
+        )
+        sm = ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+        plt.colorbar(sm, label="wealth", ax=ax)
 
-    for t in range(args.num_iter):
+    for t in tqdm(range(args.num_iter)):
         m.step()
         monies = [m.node_to_agent[i].wealth for i in range(m.N)]
 
