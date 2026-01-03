@@ -34,7 +34,8 @@ from mesa import Agent, Model
 from mesa.datacollection import DataCollector
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
+    format="%(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -378,14 +379,15 @@ def parse_args():
 
 
 
-def estimate_max():
+def estimate_expected_avg_wealth(g: Graph):
     """
     Completely back-of-the-envelope estimate of "about how much should each
     agent expect to win during this situation?" The crude formula assumes an
     independent 50/50 chance of choosing to defect or cooperate.
     """
-    per_encounter = .25 * (args.R*2) + .5 * (args.T + args.S) + .25 * (args.P)
-    return per_encounter / 2 * args.num_iter
+    per_encounter = .25 * (args.R*2) + .5 * (args.T + args.S) + .25 * (args.P*2)
+    encounters_per_iter = g.size()
+    return per_encounter * encounters_per_iter * args.num_iter / g.order()
 
 
 # ------------------------------------------------------------
@@ -416,22 +418,25 @@ if __name__ == "__main__":
 
     m = IPDModel(
         N=args.N,
-        ER_edge_prob=0.2,
+        ER_edge_prob=.2,
         payoff_matrix=payoff_matrix,
         agent_factory=factory,
-        seed=123,
+        seed=args.seed,
     )
 
     # Graph plotting stuff.
     pos = nx.spring_layout(m.graph, seed=args.seed, k=1.2)
     cmap = mpl.colormaps["coolwarm"]  # blue->white->red
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(constrained_layout=True)
     ax.set_axis_off()
-    norm = Normalize(vmin=0, vmax=estimate_max() * 2, clip=True)
+    norm = Normalize(
+        vmin=0,
+        vmax=estimate_expected_avg_wealth(m.graph) * 2,
+        clip=True,
+    )
     sm = ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
     plt.colorbar(sm, label="wealth", ax=ax)
-    plt.tight_layout()
 
     for t in range(args.num_iter):
         m.step()
@@ -443,6 +448,13 @@ if __name__ == "__main__":
             pos=pos,
             edge_color="black",
             width=1.0,
+            ax=ax
+        )
+        nx.draw_networkx_labels(
+            m.graph,
+            pos=pos,
+            font_size=10,
+            font_color="black",
             ax=ax
         )
         nodes = list(m.graph.nodes())
@@ -459,9 +471,8 @@ if __name__ == "__main__":
                 node_size=350,
                 ax=ax,
             )
-        plt.show(block=False)
-        plt.pause(0.001)
-        time.sleep(.2)
+        plt.title(f"Iteration {t+1} of {args.num_iter}")
+        plt.pause(0.3)
         avg_payoff = sum(a.wealth for a in m.agents) / len(m.agents)
         coop_rate = m._coop_rate()
         print(f"Step {t+1:02d} | avg_payoff={avg_payoff:.2f} | coop_rate={coop_rate:.2f}")
