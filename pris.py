@@ -25,6 +25,7 @@ from typing import Dict, List, Tuple, Optional, Type
 from dataclasses import dataclass
 import logging
 
+import polars as pl
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from matplotlib.cm import ScalarMappable
@@ -80,6 +81,46 @@ class AgentFactory:
     ):
         cls = self.sample_class(rng=rng)
         return cls(model, node, **kwargs)
+
+
+
+def per_agent_type_stats(
+    model: IPDModel,
+) -> dict[str, float]:
+    """
+    Compute per-agent-type averages for the current step.
+    Returns a flat dict suitable for a DataFrame row.
+    """
+    from collections import defaultdict
+
+    agent_counts = defaultdict(int)
+    coop_counts = defaultdict(int)
+    decision_counts = defaultdict(int)
+    wealth_sums = defaultdict(float)
+
+    for agent in model.agents:
+        cls = agent.__class__.__name__
+        agent_counts[cls] += 1
+        wealth_sums[cls] += agent.wealth
+        for d in agent.decisions.values():
+            decision_counts[cls] += 1
+            if d == "C":
+                coop_counts[cls] += 1
+
+    row = {}
+    for cls in agent_counts:
+        row[f"{cls}Coop".replace("Agent", "")] = (
+            coop_counts[cls] / decision_counts[cls]
+            if decision_counts[cls] > 0
+            else 0.0
+        )
+        row[f"{cls}$".replace("Agent", "",)] = (
+            wealth_sums[cls] / agent_counts[cls]
+            if agent_counts[cls] > 0
+            else 0.0
+        )
+
+    return row
 
 
 
@@ -401,6 +442,7 @@ if __name__ == "__main__":
     if not 2*args.R > args.S + args.T:
         raise "Prisoner's dilemma constraint #2 violated (2R>T+S)."
 
+    stats = []
 
     # ------------------------------------------------------------
     # Payoff matrix.
@@ -475,5 +517,9 @@ if __name__ == "__main__":
         plt.pause(0.3)
         avg_payoff = sum(a.wealth for a in m.agents) / len(m.agents)
         coop_rate = m._coop_rate()
-        print(f"Step {t+1:02d} | avg_payoff={avg_payoff:.2f} | coop_rate={coop_rate:.2f}")
+        row = {"step": t + 1}
+        row.update(per_agent_type_stats(m))
+        stats.append(row)
 
+    stats = pl.DataFrame(stats)
+    print(stats)
