@@ -14,7 +14,13 @@
 
 - [ ] ER edge freq
 - [ ] Different graph types
+    - [x] SBM
+    - [ ] BA
 
 ## Questions
 
 - [ ] When enough TFTs interact, can they beat Mean?
+    - [ ] Does a stochastic block model, putting TFTs with TFTs and Means with
+      Means, tip it so that TFTs win?
+    - [ ] In a Barabasi-Albert, what's the effect of putting TFTs on high-freq
+      nodes vs. Means?
