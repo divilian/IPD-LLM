@@ -21,7 +21,7 @@ import time
 import math
 import argparse
 from enum import Enum, auto
-import random   # using only Mesa's rng; this is for a type hint
+import random as py_random  # using only Mesa's rng; this is for a type hint
 from collections import defaultdict, Counter
 from collections.abc import Mapping
 from typing import Dict, List, Tuple, Optional, Type
@@ -78,7 +78,7 @@ class AgentFactory:
     def plan_classes(
         self,
         n_agents: int,
-        rng: random.Random,
+        rng: py_random.Random,
     ) -> list[Type]:
         """
         Return a list of agent classes of length n_agents.
@@ -108,14 +108,14 @@ class AgentFactory:
 
     def sample_class(
         self,
-        rng: random.Random
+        rng: py_random.Random
     ) -> Type:
         classes, weights = zip(*self.probs.items())
         return rng.choices(classes, weights=weights, k=1)[0]
 
     def instantiate_all(
         self,
-        rng: random.Random,
+        rng: py_random.Random,
         model: mesa.Model,
         nodes: list[int],
         **kwargs
@@ -182,7 +182,7 @@ def llm_decision(
     Replace this stub with a real LLM API call.
     Keep it deterministic-ish if you care about reproducibility.
     """
-    return random.choice(["C", "D"])
+    return "C"
 
 
 # ------------------------------------------------------------
@@ -285,12 +285,12 @@ class TitForTatAgent(IPDAgent):
         log = f"I'm node {self.node} (TFT), interacting with {other.node}. "
         h = self.history[other.node]
         if not h:
-            choice = random.choice(["C", "D"])
+            choice = self.model.random.choice(["C", "D"])
             log += f"It's my first time! ({choice})."
             return choice, log
 
-        if random.random() < self.noise:
-            choice = random.choice(["C", "D"])
+        if self.model.random.random() < self.noise:
+            choice = self.model.random.choice(["C", "D"])
             log += f"I'm going random ({choice})."
             return choice, log
 
