@@ -153,7 +153,6 @@ def compute_sbm_probs(
     p_same = 0.0 if max_edges_same == 0 else min(1.0, E_same / max_edges_same)
     p_diff = 0.0 if max_edges_diff == 0 else min(1.0, E_diff / max_edges_diff)
 
-    print(f"p_same = {p_same:.3f}, p_diff = {p_diff:.3f}")
     return p_same, p_diff
 
 
@@ -425,6 +424,22 @@ class IPDModel(Model):
             }
         )
 
+    def assortativity(self) -> float:
+        """
+        Return the graph's assortativity by agent type. A value of 0 means
+        agents are indifferent to what type they connected to. A positive value
+        means they're more likely to connect to the same type (a TitForTat to
+        other TitForTats, e.g.). A negative value means they're more likely to
+        connect to different types (a TitForTat to Means and Suckers, e.g.)
+        """
+        nx.set_node_attributes(
+            self.graph,
+            {node: agent.__class__.__name__
+             for node, agent in self.node_to_agent.items()},
+            name="agent_type",
+        )
+        return nx.attribute_assortativity_coefficient(self.graph, "agent_type")
+
     def _coop_rate(self) -> float:
         total = 0
         coop = 0
@@ -495,7 +510,8 @@ class IPDModel(Model):
         ret_val = "with this agent mix:\n"
         am = [ f"{c:>18}:{n:>5}" for c, n in self.agent_mix().items() ]
         ret_val += "\n".join(am)
-        ret_val += f"\nThe graph has {self.graph.size()} edges."
+        ret_val += f"\nThe graph has {self.graph.size()} edges "
+        ret_val += f"and assortativity {self.assortativity():.3f}."
         return ret_val
 
 
