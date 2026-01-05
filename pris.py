@@ -10,7 +10,7 @@ Iterated Prisoner's Dilemma on an Erdős–Rényi graph with:
 Install:
   pip install mesa networkx
 Run:
-  python pd_ergraph_mesa3.py
+  python pris.py
 """
 
 from __future__ import annotations
