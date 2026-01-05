@@ -51,13 +51,11 @@ class SamplingMode(Enum):
 @dataclass(frozen=True, slots=True)
 class AgentFactory:
     probs: Mapping[Type, float]
-    mode: SamplingMode = SamplingMode.STOCHASTIC
 
     @classmethod
     def from_cli(
         cls,
         tokens: list[str],
-        mode: SamplingMode,
     ) -> "AgentFactory":
         if not tokens or len(tokens) % 2 != 0:
             raise ValueError("--agent_fracs must be AGENT FRAC pairs")
@@ -68,7 +66,7 @@ class AgentFactory:
             frac = float(frac_str)
             probs[globals()[name + "Agent"]] = frac
 
-        return cls(probs, mode)
+        return cls(probs)
 
     def __post_init__(self) -> None:
         s = sum(self.probs.values())
@@ -83,35 +81,24 @@ class AgentFactory:
         """
         Return a list of agent classes of length n_agents.
         """
-        if self.mode is SamplingMode.STOCHASTIC:
-            classes, weights = zip(*self.probs.items())
-            return rng.choices(classes, weights=weights, k=n_agents)
-        else:
-            plan: list[Type] = []
+        plan: list[Type] = []
 
-            counts = {
-                cls: int(round(p * n_agents))
-                for cls, p in self.probs.items()
-            }
+        counts = {
+            cls: int(round(p * n_agents))
+            for cls, p in self.probs.items()
+        }
 
-            # Fix rounding drift.
-            while sum(counts.values()) != n_agents:
-                diff = n_agents - sum(counts.values())
-                cls = max(self.probs, key=self.probs.get)
-                counts[cls] += diff
+        # Fix rounding drift.
+        while sum(counts.values()) != n_agents:
+            diff = n_agents - sum(counts.values())
+            cls = max(self.probs, key=self.probs.get)
+            counts[cls] += diff
 
-            for cls, k in counts.items():
-                plan.extend([cls] * k)
+        for cls, k in counts.items():
+            plan.extend([cls] * k)
 
-            rng.shuffle(plan)
-            return plan
-
-    def sample_class(
-        self,
-        rng: py_random.Random
-    ) -> Type:
-        classes, weights = zip(*self.probs.items())
-        return rng.choices(classes, weights=weights, k=1)[0]
+        rng.shuffle(plan)
+        return plan
 
     def instantiate_all(
         self,
@@ -387,17 +374,10 @@ class IPDModel(Model):
 
         self.N = N
         self.payoff_matrix = payoff_matrix
-        self.agent_factory = agent_factory
-
-        # ------------------------------------------------------------
-        # 1) Plan agent classes FIRST
-        # ------------------------------------------------------------
-        planned = self.agent_factory.plan_classes(N, rng=self.random)
 
         # Distinct classes = SBM blocks (stable order)
-        classes = sorted(set(planned), key=lambda c: c.__name__)
-        counts = Counter(planned)
-        sizes = [counts[c] for c in classes]
+        classes = sorted(agent_factory.probs, key=lambda c: c.__name__)
+        sizes = [ int(round(agent_factory.probs[c] * N)) for c in classes ]
 
         # ---------------------------------------------------------------
         # 2) Compute SBM probabilities from avg_degree + homophily_weight
@@ -429,16 +409,6 @@ class IPDModel(Model):
 
         self.node_to_agent = dict(zip(nodes, agents))
         self.agent_to_node = dict(zip(agents, nodes))
-
-        nx.set_node_attributes(
-            self.graph,
-            {node: agent.__class__.__name__
-             for node, agent in self.node_to_agent.items()},
-            name="agent_type",
-        )
-        assortativity = nx.attribute_assortativity_coefficient(
-            self.graph, "agent_type")
-        print(f"Assortativity: {assortativity:.3f}")
 
         self.datacollector = DataCollector(
             model_reporters={
@@ -566,12 +536,6 @@ def parse_args():
         default=["Sucker", 1.0]
     )
     parser.add_argument(
-        "--af_mode",
-        choices=["DETERMINISTIC", "STOCHASTIC"],
-        default="DETERMINISTIC",
-        help="AgentFactory mode: generate *exactly* according to agent-fracs?"
-    )
-    parser.add_argument(
         "--avg_degree",
         type=float,
         default=0.20,
@@ -668,7 +632,7 @@ if __name__ == "__main__":
         ("D", "D"): (args.P, args.P),
     }
 
-    factory = AgentFactory.from_cli(args.agent_fracs, args.af_mode)
+    factory = AgentFactory.from_cli(args.agent_fracs)
 
     m = IPDModel(
         N=args.N,
