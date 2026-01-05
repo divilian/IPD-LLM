@@ -129,6 +129,47 @@ class AgentFactory:
         return [cls(model, node, **kwargs) for cls, node in zip(planned,nodes)]
 
 
+def compute_sbm_probs(
+    sizes: list[int],
+    avg_degree: float,
+    homophily_weight: float,   # 0 = only diff-type edges; 1 = only same-type
+) -> tuple[float, float]:
+    """
+    Compute (p_same, p_diff) for a vanilla SBM with:
+      - block sizes
+      - target average degree
+      - homophily weight in [0,1]
+
+    We allocate the expected-edge "budget" E across within/between pair sets,
+    then convert expected edges to probabilities. If an extreme is infeasible
+    (e.g., too few within-block pairs to hit avg_degree), we clamp at 1.0.
+    """
+    N = sum(sizes)
+    if N <= 1:
+        return 0.0, 0.0
+
+    max_edges_same = sum(n * (n - 1) / 2 for n in sizes)
+    max_edges_diff = sum(
+        sizes[i] * sizes[j]
+        for i in range(len(sizes))
+        for j in range(i + 1, len(sizes))
+    )
+
+    # Target expected total edges for simple undirected graph.
+    E = N * avg_degree / 2
+
+    # Split the edge budget between same- and diff- type edges.
+    E_same = homophily_weight * E
+    E_diff = (1.0 - homophily_weight) * E
+
+    # Convert expected edges to probabilities (clamp to [0,1]).
+    p_same = 0.0 if max_edges_same == 0 else min(1.0, E_same / max_edges_same)
+    p_diff = 0.0 if max_edges_diff == 0 else min(1.0, E_diff / max_edges_diff)
+
+    print(f"p_same = {p_same:.3f}, p_diff = {p_diff:.3f}")
+    return p_same, p_diff
+
+
 
 def per_agent_type_stats(
     model: IPDModel,
@@ -328,40 +369,76 @@ class LLMPDAgent(IPDAgent):
 
 class IPDModel(Model):
     """
-    Iterated Prisoner's Dilemma on a static Erdős–Rényi graph, Mesa 3.x style.
+    Iterated Prisoner's Dilemma on a static graph, Mesa 3.x style.
 
-    Activation: self.agents.shuffle_do("step") (RandomActivation replacement).
+    Graph is generated via an SBM using avg_degree + homophily_weight.
     """
 
     def __init__(
         self,
-        N, # num agents
-        ER_edge_prob: float,
+        N,  # num agents
+        avg_degree: float,
+        homophily_weight: float,
         payoff_matrix: List[Tuple],
         agent_factory: AgentFactory,
-        seed: int
+        seed: int,
     ):
-        super().__init__(seed=seed)  # Mesa 3.x: required, seed supported
+        super().__init__(seed=seed)
 
         self.N = N
         self.payoff_matrix = payoff_matrix
-
-        self.graph = nx.erdos_renyi_graph(N, ER_edge_prob, seed=seed)
-        # Shuffle node numbers so that agents are assigned randomly to nodes
-        # (instead of all type A's first, then all type B's, etc.)
-        nodes = list(self.graph.nodes)
-        self.random.shuffle(nodes)
-
         self.agent_factory = agent_factory
 
-        # Create agents, one per node (store mapping for fast lookup)
-        agents = self.agent_factory.instantiate_all(
-            rng=self.random,
-            model=self,
-            nodes=nodes,
+        # ------------------------------------------------------------
+        # 1) Plan agent classes FIRST
+        # ------------------------------------------------------------
+        planned = self.agent_factory.plan_classes(N, rng=self.random)
+
+        # Distinct classes = SBM blocks (stable order)
+        classes = sorted(set(planned), key=lambda c: c.__name__)
+        counts = Counter(planned)
+        sizes = [counts[c] for c in classes]
+
+        # ---------------------------------------------------------------
+        # 2) Compute SBM probabilities from avg_degree + homophily_weight
+        # ---------------------------------------------------------------
+        p_same, p_diff = compute_sbm_probs(
+            sizes=sizes,
+            avg_degree=avg_degree,
+            homophily_weight=homophily_weight,
         )
+
+        k = len(classes)
+        p = [[p_diff] * k for _ in range(k)]
+        for i in range(k):
+            p[i][i] = p_same
+
+        # ------------------------------------------------------------
+        # 3) Build SBM graph (nodes grouped by block)
+        # ------------------------------------------------------------
+        self.graph = nx.stochastic_block_model(sizes, p, seed=seed)
+
+        nodes = list(self.graph.nodes)
+        agents = []
+        idx = 0
+        for cls, sz in zip(classes, sizes):
+            for _ in range(sz):
+                node = nodes[idx]
+                agents.append(cls(self, node))
+                idx += 1
+
         self.node_to_agent = dict(zip(nodes, agents))
         self.agent_to_node = dict(zip(agents, nodes))
+
+        nx.set_node_attributes(
+            self.graph,
+            {node: agent.__class__.__name__
+             for node, agent in self.node_to_agent.items()},
+            name="agent_type",
+        )
+        assortativity = nx.attribute_assortativity_coefficient(
+            self.graph, "agent_type")
+        print(f"Assortativity: {assortativity:.3f}")
 
         self.datacollector = DataCollector(
             model_reporters={
@@ -369,8 +446,10 @@ class IPDModel(Model):
                     lambda m: sum(a.wealth for a in m.agents) / len(m.agents),
                 "coop_rate": self._coop_rate,
                 "avg_degree":
-                    lambda m: (sum(dict(m.graph.degree()).values()) /
-                        m.graph.number_of_nodes())
+                    lambda m: (
+                        sum(dict(m.graph.degree()).values())
+                        / m.graph.number_of_nodes()
+                    )
                     if m.graph.number_of_nodes()
                     else 0.0,
             }
@@ -493,10 +572,17 @@ def parse_args():
         help="AgentFactory mode: generate *exactly* according to agent-fracs?"
     )
     parser.add_argument(
-        "--ER-edge-prob",
+        "--avg_degree",
         type=float,
-        default=.1,
-        help="If using Erdős–Rényi graphs, the edge probability."
+        default=0.20,
+        help="Target average degree of graph. (For ER, this is edge_prob.)"
+    )
+    parser.add_argument(
+        "--homophily-weight",
+        type=float,
+        default=0.5,
+        help="fraction of each agent's expected edge budget allocated to "
+            "same-type agents",
     )
     parser.add_argument(
         "--seed",
@@ -586,7 +672,8 @@ if __name__ == "__main__":
 
     m = IPDModel(
         N=args.N,
-        ER_edge_prob=args.ER_edge_prob,
+        avg_degree=args.avg_degree,
+        homophily_weight=args.homophily_weight,
         payoff_matrix=payoff_matrix,
         agent_factory=factory,
         seed=args.seed,
