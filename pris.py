@@ -623,16 +623,13 @@ def print_stats(stats: pl.DataFrame, last_n=20):
     )
 
 
-# ------------------------------------------------------------
-# Demo run
-# ------------------------------------------------------------
 if __name__ == "__main__":
 
     args = parse_args()
     if not args.T > args.R > args.P > args.S:
-        raise "Prisoner's dilemma constraint #1 violated (T>R>P>S)."
+        raise ValueError("PD constraint #1 violated (T>R>P>S).")
     if not 2*args.R > args.S + args.T:
-        raise "Prisoner's dilemma constraint #2 violated (2R>T+S)."
+        raise ValueError("PD constraint #2 violated (2R>T+S).")
 
     stats = []
 
