@@ -270,6 +270,12 @@ class IPDAgent(Agent):
             self.decisions[nbr], desc = self.decide_against(other)
             logging.info(desc)
 
+    def __str__(self) -> str:
+        return (
+            f"Node {self.model.agent_to_node[self]} "
+            f"({self.__class__.__name__}) "
+            f"with ${int(self.wealth)}"
+        )
 
 class SuckerAgent(IPDAgent):
     """Always cooperates."""
@@ -680,12 +686,53 @@ def print_stats(stats: pl.DataFrame, last_n=20):
 
     stats = stats.select(other + ordered)
 
-    stats.tail(last_n).show(
-        limit=None,
+    with pl.Config(
+        tbl_hide_dataframe_shape=True,
+        tbl_hide_column_data_types=True,
         float_precision=2,
         tbl_cell_numeric_alignment="RIGHT",
-    )
+    ):
+        print(stats.tail(last_n))
 
+
+def interact_with_model(m: IPDModel):
+
+    def node_prompt(m):
+        return f"Enter node (0-{len(m.agents)-1},'done'): "
+    def neigh_prompt(m,n):
+        neigh_list = ','.join([ str(k) for k in m.graph.neighbors(n) ])
+        return (
+            f"  Enter neighbor of {n} ({neigh_list},'done'): "
+        )
+
+    node_num_str = input(node_prompt(m))
+    while node_num_str != "done":
+        n = int(node_num_str)
+        print(m.node_to_agent[n])
+        neighs = m.graph.neighbors(n)
+        if neighs:
+            print("Neighbors:")
+            for neigh in neighs:
+                print(f"  - {m.node_to_agent[neigh]}")
+            node_num_str = input(neigh_prompt(m,n))
+            while node_num_str != "done":
+                neigh = int(node_num_str)
+                if neigh in m.graph.neighbors(n):
+                    ncn = m.node_to_agent[neigh].__class__.__name__
+                    print(f"History with {ncn} {neigh}:")
+                    print(
+                        pl.DataFrame(m.node_to_agent[n].history[neigh]).rename(
+                            {
+                                'self_action':f'Node {n}',
+                                'other_action':f'Node {neigh}'
+                            }
+                        )
+                    )
+                else:
+                    print(f"  (Node {n} not adjacent to {neigh}.)")
+                node_num_str = input(neigh_prompt(m,n))
+                
+        node_num_str = input(node_prompt(m))
 
 if __name__ == "__main__":
 
@@ -717,20 +764,19 @@ if __name__ == "__main__":
     )
     print(f"Running {m}")
 
-    # Graph plotting stuff.
     if args.plot:
         m.setup_plotting()
 
     for t in tqdm(range(args.num_iter)):
         m.step()
         monies = [m.node_to_agent[i].wealth for i in range(m.N)]
-
         if args.plot:
             m.plot()
-
         row = {"step": t + 1}
         row.update(per_agent_type_stats(m))
         stats.append(row)
 
     stats = pl.DataFrame(stats)
     print_stats(stats)
+
+    interact_with_model(m)
