@@ -372,6 +372,7 @@ class IPDModel(Model):
         super().__init__(seed=seed)
 
         self.N = N
+        self.seed = seed
         self.payoff_matrix = payoff_matrix
 
         # Distinct classes = SBM blocks (stable order)
@@ -506,6 +507,61 @@ class IPDModel(Model):
             Counter(agent.__class__.__name__ for agent in self.agents)
         )
 
+    def setup_plotting(self) -> None:
+        """
+        This method must be called once before subsequent calls to .plot() are
+        made. It sets up instance variables:
+            - fig, ax (matplotlib objects used thereafter)
+            - pos (layout positions of nodes)
+            - cmap (the colormap used to plot wealth as color)
+            - norm (the normalizer used to scale wealths for plotting)
+        """
+        self.pos = nx.spring_layout(self.graph, seed=m.seed, k=1.2)
+        self.cmap = mpl.colormaps["coolwarm"]  # blue->white->red
+        self.fig, self.ax = plt.subplots(constrained_layout=True)
+        self.ax.set_axis_off()
+        self.norm = Normalize(
+            vmin=0,
+            vmax=estimate_expected_avg_wealth(self.graph),
+            clip=True,
+        )
+        sm = ScalarMappable(norm=self.norm, cmap=self.cmap)
+        sm.set_array([])
+        self.fig.colorbar(sm, label="wealth", ax=self.ax)
+
+    def plot(self):
+        self.ax.clear()
+        nx.draw_networkx_edges(
+            self.graph,
+            pos=self.pos,
+            edge_color="black",
+            width=1.0,
+            ax=self.ax
+        )
+        nx.draw_networkx_labels(
+            self.graph,
+            pos=self.pos,
+            font_size=10,
+            font_color="black",
+            ax=self.ax
+        )
+        nodes = list(self.graph.nodes())
+        colors = [self.cmap(self.norm(w)) for w in monies]
+        shapes = [self.node_to_agent[i].shape() for i in nodes]
+        for shape in set(shapes):
+            idx = [i for i, s in enumerate(shapes) if s == shape]
+            nx.draw_networkx_nodes(
+                self.graph,
+                pos=self.pos,
+                nodelist=[nodes[i] for i in idx],
+                node_color=[colors[i] for i in idx],
+                node_shape=shape,
+                node_size=350,
+                ax=self.ax,
+            )
+        self.fig.suptitle(f"Iteration {t+1} of {args.num_iter}")
+        plt.pause(0.1)
+
     def __str__(self):
         ret_val = "with this agent mix:\n"
         am = [ f"{c:>18}:{n:>5}" for c, n in self.agent_mix().items() ]
@@ -580,7 +636,15 @@ def parse_args():
         type=int,
         default=100
     )
-    return parser.parse_args()
+
+    args = parser.parse_args()
+
+    if not args.T > args.R > args.P > args.S:
+        raise ValueError("PD constraint #1 violated (T>R>P>S).")
+    if not 2*args.R > args.S + args.T:
+        raise ValueError("PD constraint #2 violated (2R>T+S).")
+
+    return args
 
 
 
@@ -626,10 +690,6 @@ def print_stats(stats: pl.DataFrame, last_n=20):
 if __name__ == "__main__":
 
     args = parse_args()
-    if not args.T > args.R > args.P > args.S:
-        raise ValueError("PD constraint #1 violated (T>R>P>S).")
-    if not 2*args.R > args.S + args.T:
-        raise ValueError("PD constraint #2 violated (2R>T+S).")
 
     stats = []
 
@@ -659,55 +719,14 @@ if __name__ == "__main__":
 
     # Graph plotting stuff.
     if args.plot:
-        pos = nx.spring_layout(m.graph, seed=args.seed, k=1.2)
-        cmap = mpl.colormaps["coolwarm"]  # blue->white->red
-        fig, ax = plt.subplots(constrained_layout=True)
-        ax.set_axis_off()
-        norm = Normalize(
-            vmin=0,
-            vmax=estimate_expected_avg_wealth(m.graph),
-            clip=True,
-        )
-        sm = ScalarMappable(norm=norm, cmap=cmap)
-        sm.set_array([])
-        plt.colorbar(sm, label="wealth", ax=ax)
+        m.setup_plotting()
 
     for t in tqdm(range(args.num_iter)):
         m.step()
         monies = [m.node_to_agent[i].wealth for i in range(m.N)]
 
         if args.plot:
-            ax.clear()
-            nx.draw_networkx_edges(
-                m.graph,
-                pos=pos,
-                edge_color="black",
-                width=1.0,
-                ax=ax
-            )
-            nx.draw_networkx_labels(
-                m.graph,
-                pos=pos,
-                font_size=10,
-                font_color="black",
-                ax=ax
-            )
-            nodes = list(m.graph.nodes())
-            colors = [cmap(norm(w)) for w in monies]
-            shapes = [m.node_to_agent[i].shape() for i in nodes]
-            for shape in set(shapes):
-                idx = [i for i, s in enumerate(shapes) if s == shape]
-                nx.draw_networkx_nodes(
-                    m.graph,
-                    pos=pos,
-                    nodelist=[nodes[i] for i in idx],
-                    node_color=[colors[i] for i in idx],
-                    node_shape=shape,
-                    node_size=350,
-                    ax=ax,
-                )
-            plt.title(f"Iteration {t+1} of {args.num_iter}")
-            plt.pause(0.1)
+            m.plot()
 
         row = {"step": t + 1}
         row.update(per_agent_type_stats(m))
