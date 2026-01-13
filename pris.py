@@ -15,6 +15,8 @@ Run:
 
 from __future__ import annotations
 
+import requests
+import subprocess
 from tqdm import tqdm
 import re
 import time
@@ -193,19 +195,17 @@ def per_agent_type_stats(
 
 def get_prompt(payoff_matrix, history):
     return f"""
-    You are a player in an Iterated Prisoner's Dilemma game. In each round, you
-    and your opponent will choose to either cooperate or defect.
-    If you both cooperate, you will both be awarded ${payoff_matrix[("C","C")]}.
-    If you cooperate and your opponent defects, you will get
-    ${payoff_matrix[("C","D")]} and your opponent will get.
-    ${payoff_matrix[("D","C")]}.
-    If you defect and your opponent cooperates, you will get
-    ${payoff_matrix[("D","C")]} and your opponent will get.
-    ${payoff_matrix[("C","D")]}.
-    If you both defect, you will both be awarded ${payoff_matrix[("D","D")]}.
-    This is the first iteration of the game (neither player has moved yet).
-    Do you choose to Cooperate, or Defect? Give one word as your response:
-    either the word "Cooperate" or the word "Defect".
+        You are a player in an Iterated Prisoner's Dilemma game. In each round,
+        you and your opponent will choose to either cooperate or defect. If you both
+        cooperate, you will both be awarded ${payoff_matrix[('C','C')][0]}. If you
+        cooperate and your opponent defects, you will get
+        ${payoff_matrix[('C','D')][0]} and your opponent will get
+        ${payoff_matrix[('C','D')][1]}. If you defect and your opponent cooperates, you
+        will get ${payoff_matrix[('D','C')][0]} and your opponent will get
+        ${payoff_matrix[('D','C')][1]}. If you both defect, you will both be awarded
+        ${payoff_matrix[('D','D')][0]}. This is the first iteration of the game
+        (neither player has moved yet). Do you choose to Cooperate, or Defect? Give one
+        word as your response: either the word Cooperate or the word Defect."
     """
 
 def start_llm_server():
@@ -215,6 +215,7 @@ def start_llm_server():
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+
 def llm_decision(
     self_node: int,
     other_node: int,
@@ -230,9 +231,13 @@ def llm_decision(
         r = requests.post(
             "http://127.0.0.1:8080/completion",
             json={
-                "prompt": get_prompt(payoff_matrix, history),
-                "n_predict": 8,
+                "prompt": get_prompt(payoff_matrix, history) + "\nAnswer:",
+                "n_predict": 5,
                 "temperature": 0.0,
+                "top_k": 1,
+                "top_p": 1.0,
+                "grammar": 'root ::= "Cooperate" | "Defect"',
+                "stop": ["\n"],
             },
             timeout=10,
         )
@@ -240,7 +245,7 @@ def llm_decision(
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
         requests.exceptions.HTTPError) as e:
         print("Starting Llama server...")
-        start_server()
+        start_llm_server()
 
     answer = r.json()["content"]
     if answer not in ["Cooperate","Defect"]:
@@ -407,6 +412,7 @@ class LLMAgent(IPDAgent):
             self_node=self.node,
             other_node=other.node,
             history=self.history[other.node],
+            payoff_matrix=payoff_matrix,
             persona=self.persona,
             step=self.model.steps,  # Mesa 3.x counter (auto-managed)
         )
