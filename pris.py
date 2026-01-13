@@ -227,16 +227,18 @@ def llm_decision(
     """
     Decide "C" or "D" against a specific neighbor.
     """
+    messages = [
+        {"role": "system",
+         "content": 'Respond with exactly one word: "Cooperate" or "Defect".'},
+        {"role": "user", "content": get_prompt(payoff_matrix, history)},
+    ]
     try:
         r = requests.post(
-            "http://127.0.0.1:8080/completion",
+            "http://127.0.0.1:8080/v1/chat/completions",
             json={
-                "prompt": get_prompt(payoff_matrix, history) + "\nAnswer:",
-                "n_predict": 5,
+                "messages": messages,
                 "temperature": 0.0,
-                "top_k": 1,
                 "top_p": 1.0,
-                "grammar": 'root ::= "Cooperate" | "Defect"',
                 "stop": ["\n"],
             },
             timeout=10,
@@ -247,9 +249,9 @@ def llm_decision(
         print("Starting Llama server...")
         start_llm_server()
 
-    answer = r.json()["content"]
+    answer = r.json()["choices"][0]["message"]["content"].strip()
     if answer not in ["Cooperate","Defect"]:
-        raise ValueError(f"LLM didn't follow instructions! Gave {answer}.")
+        raise ValueError(f"LLM didn't follow instructions! Gave '{answer}'.")
     return answer[0]
 
 
