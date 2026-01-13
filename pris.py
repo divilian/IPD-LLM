@@ -44,10 +44,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class SamplingMode(Enum):
-    STOCHASTIC = auto()      # Agents roughly in specified proportions
-    DETERMINISTIC = auto()   # Agents exactly in specified proportions
-
 @dataclass(frozen=True, slots=True)
 class AgentFactory:
     probs: Mapping[Type, float]
