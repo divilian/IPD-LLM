@@ -191,21 +191,61 @@ def per_agent_type_stats(
     return row
 
 
+def get_prompt(payoff_matrix, history):
+    return f"""
+    You are a player in an Iterated Prisoner's Dilemma game. In each round, you
+    and your opponent will choose to either cooperate or defect.
+    If you both cooperate, you will both be awarded ${payoff_matrix[("C","C")]}.
+    If you cooperate and your opponent defects, you will get
+    ${payoff_matrix[("C","D")]} and your opponent will get.
+    ${payoff_matrix[("D","C")]}.
+    If you defect and your opponent cooperates, you will get
+    ${payoff_matrix[("D","C")]} and your opponent will get.
+    ${payoff_matrix[("C","D")]}.
+    If you both defect, you will both be awarded ${payoff_matrix[("D","D")]}.
+    This is the first iteration of the game (neither player has moved yet).
+    Do you choose to Cooperate, or Defect? Give one word as your response:
+    either the word "Cooperate" or the word "Defect".
+    """
 
+def start_llm_server():
+    subprocess.Popen(
+        ["bash", "bin/start_llm.sh"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 def llm_decision(
     self_node: int,
     other_node: int,
     history: List[Dict],
+    payoff_matrix: List[Tuple],
     persona: str,
     step: int,
 ) -> str:
     """
     Decide "C" or "D" against a specific neighbor.
-
-    Replace this stub with a real LLM API call.
-    Keep it deterministic-ish if you care about reproducibility.
     """
-    return "C"
+    try:
+        r = requests.post(
+            "http://127.0.0.1:8080/completion",
+            json={
+                "prompt": get_prompt(payoff_matrix, history),
+                "n_predict": 8,
+                "temperature": 0.0,
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+        requests.exceptions.HTTPError) as e:
+        print("Starting Llama server...")
+        start_server()
+
+    answer = r.json()["content"]
+    if answer not in ["Cooperate","Defect"]:
+        raise ValueError(f"LLM didn't follow instructions! Gave {answer}.")
+    return answer[0]
 
 
 # ------------------------------------------------------------
@@ -241,7 +281,11 @@ class IPDAgent(Agent):
             }
         )
 
-    def decide_against(self, other: "IPDAgent") -> tuple[str, str]:
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
         """
         Make a decision against another agent. Return your decision ("C" or
         "D") and a description of the interaction (for logging).
@@ -263,7 +307,8 @@ class IPDAgent(Agent):
         self.decisions.clear()
         for nbr in self.model.graph.neighbors(self.node):
             other = self.model.node_to_agent[nbr]
-            self.decisions[nbr], desc = self.decide_against(other)
+            self.decisions[nbr], desc = self.decide_against(other,
+payoff_matrix)
             logging.info(desc)
 
     def __str__(self) -> str:
@@ -279,7 +324,11 @@ class SuckerAgent(IPDAgent):
     def __init__(self, model: Model, node: int):
         super().__init__(model, node)
 
-    def decide_against(self, other: IPDAgent) -> tuple[str, str]:
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
         log = f"I'm node {self.node} (Sucker), interacting with {other.node}. "
         log += "(C'ing as always.)"
         return "C", log
@@ -294,7 +343,11 @@ class MeanAgent(IPDAgent):
     def __init__(self, model: Model, node: int):
         super().__init__(model, node)
 
-    def decide_against(self, other: IPDAgent) -> tuple[str, str]:
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
         log = f"I'm node {self.node} (Mean), interacting with {other.node}. "
         log += "(D'ing as always.)"
         return "D", log
@@ -310,7 +363,11 @@ class TitForTatAgent(IPDAgent):
         super().__init__(model, node)
         self.noise = noise
 
-    def decide_against(self, other: IPDAgent) -> tuple[str, str]:
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
         log = f"I'm node {self.node} (TFT), interacting with {other.node}. "
         h = self.history[other.node]
         if not h:
@@ -331,7 +388,7 @@ class TitForTatAgent(IPDAgent):
         return "s"   # Square = "rule-based/fair/predictable"
 
 
-class LLMPDAgent(IPDAgent):
+class LLMAgent(IPDAgent):
     """LLM-driven per-neighbor decisions."""
 
     def __init__(self, model: Model, node: int, persona: Optional[str] = None):
@@ -341,14 +398,21 @@ class LLMPDAgent(IPDAgent):
             "defection, and occasionally forgive to restore cooperation."
         )
 
-    def decide_against(self, other: IPDAgent) -> str:
-        return llm_decision(
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
+        decision = llm_decision(
             self_node=self.node,
             other_node=other.node,
             history=self.history[other.node],
             persona=self.persona,
             step=self.model.steps,  # Mesa 3.x counter (auto-managed)
         )
+        log = f"I'm node {self.node} (LLM), interacting with {other.node}. "
+        log += "I'm {decision}'ing."
+        return decision, log
 
     def shape(self) -> str:
         return "h"   # Hexagon = "tech/engineered/complex"
