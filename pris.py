@@ -196,16 +196,16 @@ def per_agent_type_stats(
 def get_prompt(payoff_matrix, history):
     return f"""
         You are a player in an Iterated Prisoner's Dilemma game. In each round,
-        you and your opponent will choose to either cooperate or defect. If you both
-        cooperate, you will both be awarded ${payoff_matrix[('C','C')][0]}. If you
-        cooperate and your opponent defects, you will get
+        you and your opponent will choose to either cooperate or defect. If you         both cooperate, you'll both be awarded ${payoff_matrix[('C','C')][0]}.
+        If you cooperate and your opponent defects, you will get
         ${payoff_matrix[('C','D')][0]} and your opponent will get
-        ${payoff_matrix[('C','D')][1]}. If you defect and your opponent cooperates, you
-        will get ${payoff_matrix[('D','C')][0]} and your opponent will get
-        ${payoff_matrix[('D','C')][1]}. If you both defect, you will both be awarded
-        ${payoff_matrix[('D','D')][0]}. This is the first iteration of the game
-        (neither player has moved yet). Do you choose to Cooperate, or Defect? Give one
-        word as your response: either the word Cooperate or the word Defect."
+        ${payoff_matrix[('C','D')][1]}. If you defect and your opponent
+        cooperates, you will get ${payoff_matrix[('D','C')][0]} and your
+        opponent will get ${payoff_matrix[('D','C')][1]}. If you both defect,
+        you will both be awarded ${payoff_matrix[('D','D')][0]}. This is the
+        first iteration of the game (neither player has moved yet). Do you
+        choose to Cooperate, or Defect? Give one word as your response: either
+        the word Cooperate or the word Defect."
     """
 
 def start_llm_server():
@@ -215,6 +215,28 @@ def start_llm_server():
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+    # Wait until it's good and ready.
+    print("Waiting until ready...")
+    deadline = time.time() + 30   # Give 30 secs
+    while time.time() < deadline:
+        try:
+            r = requests.post(
+                "http://127.0.0.1:8080",
+                json={ "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
+                 timeout=0.5,
+            )
+            # 503 = model not loaded yet → keep waiting
+            if r.status_code == 503:
+                time.sleep(0.25)
+                continue
+            print("...ready!")
+            return  # server is ready
+        except requests.RequestException:
+            print("...still waiting...")
+            time.sleep(0.25)
+    raise RuntimeError("LLM server did not become ready in time")
 
 def llm_decision(
     self_node: int,
@@ -232,7 +254,7 @@ def llm_decision(
          "content": 'Respond with exactly one word: "Cooperate" or "Defect".'},
         {"role": "user", "content": get_prompt(payoff_matrix, history)},
     ]
-    try:
+    def do_request() -> requests.Response:
         r = requests.post(
             "http://127.0.0.1:8080/v1/chat/completions",
             json={
@@ -244,10 +266,15 @@ def llm_decision(
             timeout=10,
         )
         r.raise_for_status()
+        return r
+
+    try:
+        r = do_request()
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
         requests.exceptions.HTTPError) as e:
         print("Starting Llama server...")
         start_llm_server()
+        r = do_request()  # Retry (once) now that the server's up.
 
     answer = r.json()["choices"][0]["message"]["content"].strip()
     if answer not in ["Cooperate","Defect"]:
