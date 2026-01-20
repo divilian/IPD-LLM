@@ -496,7 +496,16 @@ class IPDModel(Model):
         # ------------------------------------------------------------
         # 3) Build SBM graph (nodes grouped by block)
         # ------------------------------------------------------------
-        self.graph = nx.stochastic_block_model(sizes, p, seed=seed)
+
+        # The graph seed might have to dynamically change, since the provided
+        # seed might not produce a connected graph. So, for cleanliness, keep
+        # track of this possibly-different seed in a new inst var.
+        self.graph_seed = seed
+        self.graph = nx.stochastic_block_model(sizes, p, seed=self.graph_seed)
+        while not nx.is_connected(self.graph):
+            self.graph_seed = self.graph_seed + 1
+            self.graph = nx.stochastic_block_model(sizes, p,
+                seed=self.graph_seed)
 
         nodes = list(self.graph.nodes)
         agents = []
