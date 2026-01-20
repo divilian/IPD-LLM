@@ -715,27 +715,33 @@ def parse_args():
         "--agent-fracs",
         nargs="+",
         metavar=("AGENT", "FRAC"),
+        default=["Sucker", 0.5, "Mean", 0.5],
         help="Agent mix as pairs: AGENT FRAC AGENT FRAC ...",
-        default=["Sucker", 1.0]
     )
     parser.add_argument(
-        "--avg_degree",
+        "--avg-degree",
         type=float,
-        default=0.20,
-        help="Target average degree of graph. (For ER, this is edge_prob.)"
+        default=3.0,
+        help="Target average degree of nodes in graph."
     )
     parser.add_argument(
         "--homophily-weight",
         type=float,
         default=0.5,
-        help="fraction of each agent's expected edge budget allocated to "
-            "same-type agents",
+        help="Fraction of each agent's expected edge budget allocated to "
+            "same-type agents.",
+    )
+    parser.add_argument(
+        "--num-iter",
+        type=int,
+        default=100,
+        help="Number of simulation iterations."
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=12345,
-        help="Seed for all rng's."
+        help="Seed for rng's; starting (walking) seed for graph rng."
     )
     parser.add_argument(
         "--plot",
@@ -743,9 +749,10 @@ def parse_args():
         help="Plot animation."
     )
     parser.add_argument(
-        "--num-iter",
-        type=int,
-        default=100
+        "--analyze",
+        action="store_true",
+        help="Launch interactive node analyzer."
+    )
     parser.add_argument(
         "--log-level",
         default="WARNING",
@@ -894,4 +901,5 @@ if __name__ == "__main__":
     stats = pl.DataFrame(stats)
     print_stats(stats)
 
-    interact_with_model(m)
+    if args.analyze:
+        interact_with_model(m)
