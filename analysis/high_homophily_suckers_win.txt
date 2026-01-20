@@ -1,0 +1,1 @@
+run pris.py 5 3 1 0 20 --agent-fracs Mean .8 Sucker .1 LLM .1 --num-iter 10 --seed 123 --avg_degree 3 --homophily-weight 0.9 --plot
