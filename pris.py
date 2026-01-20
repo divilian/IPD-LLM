@@ -190,7 +190,8 @@ def per_agent_type_stats(
 def get_prompt(payoff_matrix, history):
     return f"""
         You are a player in an Iterated Prisoner's Dilemma game. In each round,
-        you and your opponent will choose to either cooperate or defect. If you         both cooperate, you'll both be awarded ${payoff_matrix[('C','C')][0]}.
+        you and your opponent will choose to either cooperate or defect. If you
+        both cooperate, you'll both be awarded ${payoff_matrix[('C','C')][0]}.
         If you cooperate and your opponent defects, you will get
         ${payoff_matrix[('C','D')][0]} and your opponent will get
         ${payoff_matrix[('C','D')][1]}. If you defect and your opponent
@@ -198,8 +199,7 @@ def get_prompt(payoff_matrix, history):
         opponent will get ${payoff_matrix[('D','C')][1]}. If you both defect,
         you will both be awarded ${payoff_matrix[('D','D')][0]}. This is the
         first iteration of the game (neither player has moved yet). Do you
-        choose to Cooperate, or Defect? Give one word as your response: either
-        the word Cooperate or the word Defect."
+        choose to Cooperate, or Defect?
     """
 
 def start_llm_server():
@@ -241,11 +241,13 @@ def llm_decision(
     step: int,
 ) -> str:
     """
-    Decide "C" or "D" against a specific neighbor.
+    Ask an LLM to decide "C" or "D" against a specific neighbor, given that
+    agent's persona and history with that neighbor.
     """
     messages = [
-        {"role": "system",
-         "content": 'Respond with exactly one word: "Cooperate" or "Defect".'},
+        {"role": "system", "content": persona},
+        {"role": "system", "content":
+            'Respond with exactly one word: "Cooperate" or "Defect".'},
         {"role": "user", "content": get_prompt(payoff_matrix, history)},
     ]
     def do_request() -> requests.Response:
@@ -848,7 +850,7 @@ def interact_with_model(m: IPDModel):
                 else:
                     print(f"  (Node {n} not adjacent to {neigh}.)")
                 node_num_str = input(neigh_prompt(m,n))
-                
+
         node_num_str = input(node_prompt(m))
 
 if __name__ == "__main__":
