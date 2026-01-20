@@ -496,9 +496,12 @@ class IPDModel(Model):
         # seed might not produce a connected graph. So, for cleanliness, keep
         # track of this possibly-different seed in a new inst var.
         self.graph_seed = seed
+        logging.info(f"Trying graph seed {self.graph_seed}...")
         self.graph = nx.stochastic_block_model(sizes, p, seed=self.graph_seed)
         while not nx.is_connected(self.graph):
             self.graph_seed = self.graph_seed + 1
+            logging.info(f"Trying graph seed {self.graph_seed}...")
+            logging.info(f"p = {p}")
             self.graph = nx.stochastic_block_model(sizes, p,
                 seed=self.graph_seed)
 
