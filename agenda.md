@@ -4,11 +4,13 @@
 
 - [x] Add agent query mode, where you can interactively type a node number and
   get its number and types of neighbors
+- [ ] Analyze on a per-dyad basis
 
 ## Model
 
 - [ ] `AmnesiacAgent` (remembers past plays, but not by whom. tit-for-tats)
 - [x] Deterministic AgentFactory
+- [ ] Give LLM agents the history
 
 ## Independent variables
 
