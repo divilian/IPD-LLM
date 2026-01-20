@@ -39,12 +39,6 @@ import networkx as nx
 from mesa import Agent, Model
 from mesa.datacollection import DataCollector
 
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(message)s"
-)
-logger = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True, slots=True)
 class AgentFactory:
@@ -749,6 +743,11 @@ def parse_args():
         "--num-iter",
         type=int,
         default=100
+    parser.add_argument(
+        "--log-level",
+        default="WARNING",
+        choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Set logging level.",
     )
 
     args = parser.parse_args()
@@ -845,6 +844,11 @@ def interact_with_model(m: IPDModel):
 if __name__ == "__main__":
 
     args = parse_args()
+
+    logging.basicConfig(
+        level=args.log_level,
+        format="%(message)s"
+    )
 
     stats = []
 
