@@ -1,11 +1,10 @@
 """
 pris.py
 
-Iterated Prisoner's Dilemma on an Erdős–Rényi graph with:
+Iterated Prisoner's Dilemma on a Stochastic Block Model graph with:
 - One agent per graph node
-- Per-neighbor decisions (true tit-for-tat)
-- Optional LLM-driven behavior
-- Mesa 3.x-compatible (no mesa.time schedulers)
+- Sucker, Mean, TitForTat, and LLM agents
+- Configurable homophily based on agent type
 
 Install:
   pip install mesa networkx
@@ -342,7 +341,7 @@ class IPDAgent(Agent):
         for nbr in self.model.graph.neighbors(self.node):
             other = self.model.node_to_agent[nbr]
             self.decisions[nbr], desc = self.decide_against(other,
-payoff_matrix)
+                payoff_matrix)
             logging.info(desc)
 
     def __str__(self) -> str:
