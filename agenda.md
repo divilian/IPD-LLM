@@ -11,6 +11,7 @@
 - [ ] `AmnesiacAgent` (remembers past plays, but not by whom. tit-for-tats)
 - [x] Deterministic AgentFactory
 - [ ] Give LLM agents the history
+- [x] Enable multiple personas
 
 ## Independent variables
 

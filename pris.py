@@ -40,23 +40,47 @@ from mesa import Agent, Model
 from mesa.datacollection import DataCollector
 
 
+def resolve_agent_spec(name: str) -> tuple[type, dict]:
+    """
+    Map a CLI agent token to (AgentClass, init_kwargs).
+
+    Examples:
+      "Sucker"      -> (SuckerAgent, {})
+      "Mean"        -> (MeanAgent, {})
+      "LLMgrudge"   -> (LLMAgent, {"persona": "grudge"})
+      "LLMvanilla"  -> (LLMAgent, {"persona": "vanilla"})
+    """
+    if name.startswith("LLM"):
+        persona = name[3:].lower()
+        if persona not in persona_prompts:
+            personas = ", ".join(persona_prompts)
+            raise ValueError(
+                f"Unknown LLM persona {persona!r}. Must be one of {personas}."
+            )
+        return LLMAgent, {"persona": persona}
+
+    try:
+        return globals()[name + "Agent"], {}
+    except KeyError as e:
+        raise ValueError(f"Unknown agent type {name!r}") from e
+
 @dataclass(frozen=True, slots=True)
 class AgentFactory:
-    probs: Mapping[Type, float]
+    probs: Mapping[tuple[type, tuple[tuple[str, object], ...]], float]
 
     @classmethod
-    def from_cli(
-        cls,
-        tokens: list[str],
-    ) -> "AgentFactory":
+    def from_cli(cls, tokens: list[str]) -> "AgentFactory":
         if not tokens or len(tokens) % 2 != 0:
-            raise ValueError("--agent_fracs must be AGENT FRAC pairs")
+            raise ValueError("--agent-fracs must be AGENT FRAC pairs")
 
-        probs: dict[Type, float] = {}
+        probs: dict[tuple[type, tuple[tuple[str, object], ...]], float] = {}
+
         it = iter(tokens)
         for name, frac_str in zip(it, it):
+            agent_cls, kwargs = resolve_agent_spec(name)
             frac = float(frac_str)
-            probs[globals()[name + "Agent"]] = frac
+            key = (agent_cls, tuple(kwargs.items()))
+            probs[key] = frac
 
         return cls(probs)
 
@@ -65,29 +89,32 @@ class AgentFactory:
         if not math.isclose(abs(sum(self.probs.values())), 1.0):
             raise ValueError(f"Probabilities must sum to 1.0, got {s}")
 
-    def plan_classes(
+    def plan_agent_specs(
         self,
         n_agents: int,
         rng: py_random.Random,
-    ) -> list[Type]:
+    ) -> list[tuple[type, dict]]:
         """
-        Return a list of agent classes of length n_agents.
+        Return a list of agent specifications of length n_agents. Each such
+        specification is a tuple of an Agent subclass type, and a dict of any
+        initialization args it needs.
         """
-        plan: list[Type] = []
+        plan: list[tuple[type, dict]] = []
 
         counts = {
-            cls: int(round(p * n_agents))
-            for cls, p in self.probs.items()
+            spec: int(round(p * n_agents))
+            for spec, p in self.probs.items()
         }
 
         # Fix rounding drift.
         while sum(counts.values()) != n_agents:
             diff = n_agents - sum(counts.values())
-            cls = max(self.probs, key=self.probs.get)
-            counts[cls] += diff
+            spec = max(self.probs, key=self.probs.get)
+            counts[spec] += diff
 
-        for cls, k in counts.items():
-            plan.extend([cls] * k)
+        for (cls, kwargs_items), k in counts.items():
+            kwargs = dict(kwargs_items)
+            plan.extend([(cls, kwargs)] * k)
 
         rng.shuffle(plan)
         return plan
@@ -100,12 +127,15 @@ class AgentFactory:
         **kwargs
     ):
         """
-        Given a list of node numbers, generate that many Agent subclasses,
+        Given a list of node numbers, generate that many Agent objects,
         according to the probs mapping that this factory was given at
         instantiation time.
         """
-        planned = self.plan_classes(len(nodes), rng=rng)
-        return [cls(model, node, **kwargs) for cls, node in zip(planned,nodes)]
+        planned = self.plan_agent_specs(len(nodes), rng=rng)
+        return [
+            cls(model, node, **kwargs)
+            for (cls, kwargs), node in zip(planned,nodes)
+        ]
 
 
 def compute_sbm_probs(
@@ -418,15 +448,31 @@ class TitForTatAgent(IPDAgent):
         return "s"   # Square = "rule-based/fair/predictable"
 
 
+persona_prompts = {
+    'vanilla': "",
+    'cautious':
+        "You are cautious but fair: reciprocate cooperation, punish "
+        "defection, and occasionally forgive to restore cooperation.",
+    'grudge':
+        "You hold grudges for quite a long time. If your opponent ever "
+        "defects, it is several turns before you'll trust them again."
+}
+
+
 class LLMAgent(IPDAgent):
     """LLM-driven per-neighbor decisions."""
 
-    def __init__(self, model: Model, node: int, persona: Optional[str] = None):
+    def __init__(
+        self,
+        model: Model,
+        node: int,
+        persona: str,
+    ):
         super().__init__(model, node)
-        self.persona = persona or (
-            "You are cautious but fair: reciprocate cooperation, punish "
-            "defection, and occasionally forgive to restore cooperation."
-        )
+        if persona not in persona_prompts:
+            personas = ", ".join(persona_prompts.keys())
+            raise ValueError(f"{persona} not one of {personas}.")
+        self.persona = persona
 
     def decide_against(
         self,
@@ -472,9 +518,12 @@ class IPDModel(Model):
         self.seed = seed
         self.payoff_matrix = payoff_matrix
 
-        # Distinct classes = SBM blocks (stable order)
-        classes = sorted(agent_factory.probs, key=lambda c: c.__name__)
-        sizes = [ int(round(agent_factory.probs[c] * N)) for c in classes ]
+        # Distinct specs = SBM blocks (stable order)
+        specs = sorted(
+            agent_factory.probs,
+            key=lambda spec: (spec[0].__name__, spec[1]),
+        )
+        sizes = [ int(round(agent_factory.probs[c] * N)) for c in specs ]
 
         # ---------------------------------------------------------------
         # 2) Compute SBM probabilities from avg_degree + homophily_weight
@@ -485,7 +534,7 @@ class IPDModel(Model):
             homophily_weight=homophily_weight,
         )
 
-        k = len(classes)
+        k = len(specs)
         p = [[p_diff] * k for _ in range(k)]
         for i in range(k):
             p[i][i] = p_same
@@ -510,10 +559,11 @@ class IPDModel(Model):
         nodes = list(self.graph.nodes)
         agents = []
         idx = 0
-        for cls, sz in zip(classes, sizes):
+        for (agent_cls, kwargs_items), sz in zip(specs, sizes):
+            init_kwargs = dict(kwargs_items)
             for _ in range(sz):
                 node = nodes[idx]
-                agents.append(cls(self, node))
+                agents.append(agent_cls(self, node, **init_kwargs))
                 idx += 1
 
         self.node_to_agent = dict(zip(nodes, agents))
@@ -686,7 +736,8 @@ class IPDModel(Model):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Iterated Prisoner's Dilemma on a graph."
+        description="Iterated Prisoner's Dilemma on a graph.",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "T",
@@ -713,12 +764,19 @@ def parse_args():
         type=int,
         help="Number of agents"
     )
+    agent_types = ["Sucker", "Mean", "TitForTat"]
+    agent_types += [f"LLM{p}" for p in persona_prompts]
     parser.add_argument(
         "--agent-fracs",
         nargs="+",
         metavar=("AGENT", "FRAC"),
         default=["Sucker", 0.5, "Mean", 0.5],
-        help="Agent mix as pairs: AGENT FRAC AGENT FRAC ...",
+        help=(
+            "Agent mix as pairs: AGENT FRAC AGENT FRAC ...\n"
+            "AGENT is one of:\n"
+            + "".join(f"  - {agent_type}\n" for agent_type in agent_types)
+            + "Ex: --agent-fracs Sucker 0.4 Mean 0.4 LLMgrudge 0.2"
+        ),
     )
     parser.add_argument(
         "--avg-degree",
