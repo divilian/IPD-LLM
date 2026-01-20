@@ -8,8 +8,8 @@ Iterated Prisoner's Dilemma on a Stochastic Block Model graph with:
 
 Install:
   pip install mesa networkx
-Run:
-  python pris.py
+Run syntax:
+  python pris.py -h
 """
 
 from __future__ import annotations
