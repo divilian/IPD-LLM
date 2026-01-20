@@ -637,6 +637,7 @@ class IPDModel(Model):
         sm = ScalarMappable(norm=self.norm, cmap=self.cmap)
         sm.set_array([])
         self.fig.colorbar(sm, label="wealth", ax=self.ax)
+        plt.show(block=False)
 
     def plot(self):
         self.ax.clear()
@@ -669,7 +670,10 @@ class IPDModel(Model):
                 ax=self.ax,
             )
         self.fig.suptitle(f"Iteration {t+1} of {args.num_iter}")
-        plt.pause(0.1)
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+        time.sleep(0.1)
+
 
     def __str__(self):
         ret_val = "with this agent mix:\n"
