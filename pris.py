@@ -477,7 +477,14 @@ class TitForTatAgent(IPDAgent):
 
 
 persona_prompts = {
-    'vanilla': "",
+    'vanilla':
+        "You should choose in a way that tries to maximize your total rewards "
+        "over time.",
+    'tft':
+        "You always do what your opponent did on their most recent move. "
+        "If they defected last time, you defect this time."
+        "If they cooperated last time, you cooperate this time."
+        "If this is the first move of the game, choose randomly.",
     'cautious':
         "You are cautious but fair: reciprocate cooperation, punish "
         "defection, and occasionally forgive to restore cooperation.",
