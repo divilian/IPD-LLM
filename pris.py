@@ -303,7 +303,7 @@ def llm_decision(
         r = do_request()  # Retry (once) now that the server's up.
 
     answer = r.json()["choices"][0]["message"]["content"].strip()
-    if answer not in ["Cooperate","Defect"]:
+    if answer not in ["Cooperate","Defect","Cooperate.","Defect."]:
         raise ValueError(f"LLM didn't follow instructions! Gave '{answer}'.")
     return answer[0]
 
