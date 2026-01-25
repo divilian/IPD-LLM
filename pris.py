@@ -722,7 +722,7 @@ class IPDModel(Model):
         self.fig.suptitle(f"Iteration {t+1} of {args.num_iter}")
         self.fig.canvas.draw_idle()
         self.fig.canvas.flush_events()
-        time.sleep(0.1)
+        time.sleep(0.01)
 
 
     def __str__(self):
@@ -740,29 +740,33 @@ def parse_args():
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        "T",
-        type=float,
-        help="Temptation to defect"
-    )
-    parser.add_argument(
-        "R",
-        type=float,
-        help="Reward for cooperating"
-    )
-    parser.add_argument(
-        "P",
-        type=float,
-        help="Punishment for mutual defection"
-    )
-    parser.add_argument(
-        "S",
-        type=float,
-        help="Sucker's payoff"
-    )
-    parser.add_argument(
         "N",
         type=int,
-        help="Number of agents"
+        help="Number of agents",
+    )
+    parser.add_argument(
+        "--T",
+        type=float,
+        help="Temptation to defect (default 5)",
+        default=5.0,
+    )
+    parser.add_argument(
+        "--R",
+        type=float,
+        help="Reward for cooperating (default 3)",
+        default=3.0,
+    )
+    parser.add_argument(
+        "--P",
+        type=float,
+        help="Punishment for mutual defection (default 1)",
+        default=1.0,
+    )
+    parser.add_argument(
+        "--S",
+        type=float,
+        help="Sucker's payoff (default 0)",
+        default=0.0,
     )
     agent_types = ["Sucker", "Mean", "TitForTat"]
     agent_types += [f"LLM{p}" for p in persona_prompts]
@@ -775,7 +779,8 @@ def parse_args():
             "Agent mix as pairs: AGENT FRAC AGENT FRAC ...\n"
             "AGENT is one of:\n"
             + "".join(f"  - {agent_type}\n" for agent_type in agent_types)
-            + "Ex: --agent-fracs Sucker 0.4 Mean 0.4 LLMgrudge 0.2"
+            + "Ex: --agent-fracs Sucker 0.4 Mean 0.4 LLMgrudge 0.2\n"
+            + "(default Sucker 0.5, Mean 0.5)"
         ),
     )
     parser.add_argument(
@@ -788,8 +793,8 @@ def parse_args():
         "--homophily-weight",
         type=float,
         default=0.5,
-        help="Fraction of each agent's expected edge budget allocated to "
-            "same-type agents.",
+        help="Fraction of each agent's expected edge budget allocated to\n"
+            "same-type agents. (default 0.5)",
     )
     parser.add_argument(
         "--num-iter",
