@@ -1,5 +1,10 @@
 # Prisoner's Dilemma agenda
 
+## Bug fixes
+
+- [ ] Each agent is playing the opponent twice; one where they initiate, and
+  one where the opponent initiates.
+
 ## Diagnostics
 
 - [x] Add agent query mode, where you can interactively type a node number and
@@ -10,7 +15,7 @@
 
 - [ ] `AmnesiacAgent` (remembers past plays, but not by whom. tit-for-tats)
 - [x] Deterministic AgentFactory
-- [ ] Give LLM agents the history
+- [x] Give LLM agents the history
 - [x] Enable multiple personas
 
 ## Independent variables

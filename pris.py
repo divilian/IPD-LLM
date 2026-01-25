@@ -217,8 +217,26 @@ def per_agent_type_stats(
     return row
 
 
-def get_prompt(payoff_matrix, history):
-    return f"""
+def serialize_history(history: List[Dict]) -> str:
+
+    choices = {"C": "Cooperated", "D": "Defected"}
+
+    lines: List[str] = [
+        "Here is the history of your interactions with this opponent so far:"
+    ]
+
+    for move in history:
+        step = move["step"]
+        you = choices[move["self_action"]]
+        they = choices[move["other_action"]]
+        lines.append(f"    On move {step}, you {you} and they {they}.")
+
+    text = "\n".join(lines)
+    return text
+
+
+def get_prompt(payoff_matrix, history: List[Dict]) -> str:
+    prompt = f"""
         You are a player in an Iterated Prisoner's Dilemma game. In each round,
         you and your opponent will choose to either cooperate or defect. If you
         both cooperate, you'll both be awarded ${payoff_matrix[('C','C')][0]}.
@@ -227,10 +245,21 @@ def get_prompt(payoff_matrix, history):
         ${payoff_matrix[('C','D')][1]}. If you defect and your opponent
         cooperates, you will get ${payoff_matrix[('D','C')][0]} and your
         opponent will get ${payoff_matrix[('D','C')][1]}. If you both defect,
-        you will both be awarded ${payoff_matrix[('D','D')][0]}. This is the
-        first iteration of the game (neither player has moved yet). Do you
-        choose to Cooperate, or Defect?
+        you will both be awarded ${payoff_matrix[('D','D')][0]}.
     """
+    if not history:
+        prompt += """
+            This is the first iteration of the game (neither player has moved
+            yet).
+        """
+    else:
+        prompt += serialize_history(history)
+
+    prompt += f"""
+        Do you choose to Cooperate, or Defect?
+    """
+    return prompt
+
 
 def start_llm_server():
     subprocess.Popen(
@@ -267,16 +296,15 @@ def llm_decision(
     other_node: int,
     history: List[Dict],
     payoff_matrix: List[Tuple],
-    persona: str,
+    persona_prompt: str,
     step: int,
 ) -> str:
     """
     Ask an LLM to decide "C" or "D" against a specific neighbor, given that
-    agent's persona and history with that neighbor.
+    agent's persona prompt and history with that neighbor.
     """
     messages = [
-        {"role": "system", "content": persona},
-        {"role": "system", "content":
+        {"role": "system", "content": persona_prompt +
             'Respond with exactly one word: "Cooperate" or "Defect".'},
         {"role": "user", "content": get_prompt(payoff_matrix, history)},
     ]
@@ -484,7 +512,7 @@ class LLMAgent(IPDAgent):
             other_node=other.node,
             history=self.history[other.node],
             payoff_matrix=payoff_matrix,
-            persona=self.persona,
+            persona_prompt=persona_prompts[self.persona],
             step=self.model.steps,  # Mesa 3.x counter (auto-managed)
         )
         log = f"I'm node {self.node} (LLM), interacting with {other.node}. "
