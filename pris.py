@@ -799,7 +799,7 @@ def parse_args():
     parser.add_argument(
         "--num-iter",
         type=int,
-        default=100,
+        default=25,
         help="Number of simulation iterations."
     )
     parser.add_argument(
