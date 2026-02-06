@@ -124,24 +124,6 @@ class AgentFactory:
         rng.shuffle(plan)
         return plan
 
-    def instantiate_all(
-        self,
-        rng: py_random.Random,
-        model: mesa.Model,
-        nodes: list[int],
-        **kwargs
-    ):
-        """
-        Given a list of node numbers, generate that many Agent objects,
-        according to the probs mapping that this factory was given at
-        instantiation time.
-        """
-        planned = self.plan_agent_specs(len(nodes), rng=rng)
-        return [
-            cls(model, node, **kwargs)
-            for (cls, kwargs), node in zip(planned,nodes)
-        ]
-
 
 def compute_sbm_probs(
     sizes: list[int],
@@ -401,13 +383,13 @@ class IPDAgent(Agent):
         for nbr in self.model.graph.neighbors(self.node):
             other = self.model.node_to_agent[nbr]
             self.decisions[nbr], desc = self.decide_against(other,
-                payoff_matrix)
+                self.model.payoff_matrix)
             logging.info(desc)
 
     def __str__(self) -> str:
         return (
-            f"Node {self.model.agent_to_node[self]} "
-            f"({self.__class__.__name__}) "
+            f"Node {self.node} (agent id {self.unique_id}) "
+            f"{self.__class__.__name__} "
             f"with ${int(self.wealth)}"
         )
 
@@ -528,7 +510,7 @@ class LLMAgent(IPDAgent):
             step=self.model.steps,  # Mesa 3.x counter (auto-managed)
         )
         log = f"I'm node {self.node} (LLM), interacting with {other.node}. "
-        log += "I'm {decision}'ing."
+        log += f"I'm {decision}'ing."
         return decision, log
 
     def shape(self) -> str:
@@ -597,17 +579,19 @@ class IPDModel(Model):
                 seed=self.graph_seed)
 
         nodes = list(self.graph.nodes)
-        agents = []
         idx = 0
+        self.node_to_agent = {}
         for (agent_cls, kwargs_items), sz in zip(specs, sizes):
             init_kwargs = dict(kwargs_items)
             for _ in range(sz):
                 node = nodes[idx]
-                agents.append(agent_cls(self, node, **init_kwargs))
+                agent = agent_cls(self, node, **init_kwargs)
+                self.node_to_agent[node] = agent
                 idx += 1
-
-        self.node_to_agent = dict(zip(nodes, agents))
-        self.agent_to_node = dict(zip(agents, nodes))
+        self.agent_to_node = {
+            agent: node
+            for node, agent in self.node_to_agent.items()
+        }
 
         self.datacollector = DataCollector(
             model_reporters={
@@ -623,6 +607,11 @@ class IPDModel(Model):
                     else 0.0,
             }
         )
+
+        # Peace of mind that node IDs and agent IDs haven't drifted weirdly.
+        assert set(self.node_to_agent.keys()) == set(self.graph.nodes)
+        assert all(a.node == n for n, a in self.node_to_agent.items())
+
 
     def assortativity(self) -> float:
         """
@@ -665,6 +654,9 @@ class IPDModel(Model):
         self.agents.shuffle_do("step")
 
         # Now, for each game that was played, record it and tally its winnings.
+        # (Only play each game once; we arbitrarily decide to have the lower
+        # numbered agent be player A and the other player B, since that's the
+        # direction that netx stores the undirected edge.)
         for i, j in self.graph.edges:
             ai = self.node_to_agent[i]
             aj = self.node_to_agent[j]
@@ -876,7 +868,7 @@ def parse_args():
 
 
 
-def estimate_expected_avg_wealth(g: Graph):
+def estimate_expected_avg_wealth(g: nx.Graph):
     """
     Completely back-of-the-envelope estimate of "about how much should each
     agent expect to win during this situation?" The crude formula assumes an
@@ -920,7 +912,10 @@ def print_stats(stats: pl.DataFrame, last_n=20):
 def interact_with_model(m: IPDModel):
 
     def node_prompt(m):
-        return f"Enter node (0-{len(m.agents)-1},'done'): "
+        return (
+            f"Enter node ({','.join([str(n) for n in sorted(m.graph.nodes)])},"
+            "'done'): "
+        )
     def neigh_prompt(m,n):
         neigh_list = ','.join([ str(k) for k in m.graph.neighbors(n) ])
         return (
@@ -996,7 +991,7 @@ if __name__ == "__main__":
 
     for t in tqdm(range(args.num_iter)):
         m.step()
-        monies = [m.node_to_agent[i].wealth for i in range(m.N)]
+        monies = [m.node_to_agent[n].wealth for n in m.graph.nodes]
         if args.plot:
             m.plot()
         row = {"step": t + 1}
