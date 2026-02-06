@@ -42,7 +42,7 @@ from mesa.datacollection import DataCollector
 
 def resolve_agent_spec(name: str) -> tuple[type, dict]:
     """
-    Map a CLI agent token to (AgentClass, init_kwargs).
+    Map an Agent classname fragment to (AgentClass, init_kwargs).
 
     Examples:
       "Sucker"      -> (SuckerAgent, {})
@@ -69,7 +69,12 @@ class AgentFactory:
     probs: Mapping[tuple[type, tuple[tuple[str, object], ...]], float]
 
     @classmethod
-    def from_cli(cls, tokens: list[str]) -> "AgentFactory":
+    def instance(cls, tokens: list[str]) -> "AgentFactory":
+        """
+        This singleton method expects a list of strings, which are alternating
+        agent name fragments and probabilities on the simplex. Example:
+        ['Sucker', '0.4', 'Mean', '0.4', 'LLMgrudge', '0.2']. 
+        """
         if not tokens or len(tokens) % 2 != 0:
             raise ValueError("--agent-fracs must be AGENT FRAC pairs")
 
@@ -974,7 +979,7 @@ if __name__ == "__main__":
         ("D", "D"): (args.P, args.P),
     }
 
-    factory = AgentFactory.from_cli(args.agent_fracs)
+    factory = AgentFactory.instance(args.agent_fracs)
 
     m = IPDModel(
         N=args.N,
