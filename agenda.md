@@ -2,9 +2,6 @@
 
 ## Bug fixes
 
-- [ ] Each agent is playing the opponent twice; one where they initiate, and
-  one where the opponent initiates.
-
 ## Diagnostics
 
 - [x] Add agent query mode, where you can interactively type a node number and
