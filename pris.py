@@ -40,7 +40,10 @@ from mesa import Agent, Model
 from mesa.datacollection import DataCollector
 
 
-def resolve_agent_spec(name: str) -> tuple[type, dict]:
+def resolve_agent_spec(
+    name: str,
+    args: argparse.Namespace,
+) -> tuple[type, dict]:
     """
     Map an Agent classname fragment to (AgentClass, init_kwargs).
 
@@ -50,6 +53,9 @@ def resolve_agent_spec(name: str) -> tuple[type, dict]:
       "LLMgrudge"   -> (LLMAgent, {"persona": "grudge"})
       "LLMvanilla"  -> (LLMAgent, {"persona": "vanilla"})
     """
+    if name == "TitForTat":
+        return TitForTatAgent, {"noise": args.tft_noise}
+
     if name.startswith("LLM"):
         persona = name[3:].lower()
         if persona not in persona_prompts:
@@ -69,7 +75,7 @@ class AgentFactory:
     probs: Mapping[tuple[type, tuple[tuple[str, object], ...]], float]
 
     @classmethod
-    def instance(cls, tokens: list[str]) -> "AgentFactory":
+    def instance(cls, tokens: list[str], args) -> "AgentFactory":
         """
         This singleton method expects a list of strings, which are alternating
         agent name fragments and probabilities on the simplex. Example:
@@ -82,7 +88,7 @@ class AgentFactory:
 
         it = iter(tokens)
         for name, frac_str in zip(it, it):
-            agent_cls, kwargs = resolve_agent_spec(name)
+            agent_cls, kwargs = resolve_agent_spec(name, args)
             frac = float(frac_str)
             key = (agent_cls, tuple(kwargs.items()))
             probs[key] = frac
@@ -841,6 +847,12 @@ def parse_args():
         help="Seed for rng's; starting (walking) seed for graph rng."
     )
     parser.add_argument(
+        "--tft-noise",
+        type=float,
+        default=0.10,
+        help="TitForTatAgent noise rate in [0,1]. (default 0.10)",
+    )
+    parser.add_argument(
         "--plot",
         action="store_true",
         help="Plot animation."
@@ -863,6 +875,8 @@ def parse_args():
         raise ValueError("PD constraint #1 violated (T>R>P>S).")
     if not 2*args.R > args.S + args.T:
         raise ValueError("PD constraint #2 violated (2R>T+S).")
+    if not (0.0 <= args.tft_noise <= 1.0):
+        raise ValueError("--tft-noise must be between 0 and 1")
 
     return args
 
@@ -974,7 +988,7 @@ if __name__ == "__main__":
         ("D", "D"): (args.P, args.P),
     }
 
-    factory = AgentFactory.instance(args.agent_fracs)
+    factory = AgentFactory.instance(args.agent_fracs, args)
 
     m = IPDModel(
         N=args.N,
