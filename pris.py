@@ -15,6 +15,7 @@ Run syntax:
 
 from __future__ import annotations
 
+import textwrap
 import requests
 import subprocess
 from tqdm import tqdm
@@ -40,489 +41,7 @@ from mesa import Agent, Model
 from mesa.datacollection import DataCollector
 
 
-def resolve_agent_spec(
-    name: str,
-    args: argparse.Namespace,
-) -> tuple[type, dict]:
-    """
-    Map an Agent classname fragment to (AgentClass, init_kwargs).
-
-    Examples:
-      "Sucker"      -> (SuckerAgent, {})
-      "Mean"        -> (MeanAgent, {})
-      "LLMgrudge"   -> (LLMAgent, {"persona": "grudge"})
-      "LLMvanilla"  -> (LLMAgent, {"persona": "vanilla"})
-    """
-    if name == "TitForTat":
-        return TitForTatAgent, {"noise": args.tft_noise}
-
-    if name.startswith("LLM"):
-        persona = name[3:].lower()
-        if persona not in persona_prompts:
-            personas = ", ".join(persona_prompts)
-            raise ValueError(
-                f"Unknown LLM persona {persona!r}. Must be one of {personas}."
-            )
-        return LLMAgent, {"persona": persona}
-
-    try:
-        return globals()[name + "Agent"], {}
-    except KeyError as e:
-        raise ValueError(f"Unknown agent type {name!r}") from e
-
-@dataclass(frozen=True, slots=True)
-class AgentFactory:
-    probs: Mapping[tuple[type, tuple[tuple[str, object], ...]], float]
-
-    @classmethod
-    def instance(cls, tokens: list[str], args) -> "AgentFactory":
-        """
-        This singleton method expects a list of strings, which are alternating
-        agent name fragments and probabilities on the simplex. Example:
-        ['Sucker', '0.4', 'Mean', '0.4', 'LLMgrudge', '0.2']. 
-        """
-        if not tokens or len(tokens) % 2 != 0:
-            raise ValueError("--agent-fracs must be AGENT FRAC pairs")
-
-        probs: dict[tuple[type, tuple[tuple[str, object], ...]], float] = {}
-
-        it = iter(tokens)
-        for name, frac_str in zip(it, it):
-            agent_cls, kwargs = resolve_agent_spec(name, args)
-            frac = float(frac_str)
-            key = (agent_cls, tuple(kwargs.items()))
-            probs[key] = frac
-
-        return cls(probs)
-
-    def __post_init__(self) -> None:
-        s = sum(self.probs.values())
-        if not math.isclose(abs(sum(self.probs.values())), 1.0):
-            raise ValueError(f"Probabilities must sum to 1.0, got {s}")
-
-    def plan_agent_specs(
-        self,
-        n_agents: int,
-        rng: py_random.Random,
-    ) -> list[tuple[type, dict]]:
-        """
-        Return a list of agent specifications of length n_agents. Each such
-        specification is a tuple of an Agent subclass type, and a dict of any
-        initialization args it needs.
-        """
-        plan: list[tuple[type, dict]] = []
-
-        counts = {
-            spec: int(round(p * n_agents))
-            for spec, p in self.probs.items()
-        }
-
-        # Fix rounding drift.
-        while sum(counts.values()) != n_agents:
-            diff = n_agents - sum(counts.values())
-            spec = max(self.probs, key=self.probs.get)
-            counts[spec] += diff
-
-        for (cls, kwargs_items), k in counts.items():
-            kwargs = dict(kwargs_items)
-            plan.extend([(cls, kwargs)] * k)
-
-        rng.shuffle(plan)
-        return plan
-
-
-def compute_sbm_probs(
-    sizes: list[int],
-    avg_degree: float,
-    homophily_weight: float,   # 0 = only diff-type edges; 1 = only same-type
-) -> tuple[float, float]:
-    """
-    Compute (p_same, p_diff) for a vanilla SBM with:
-      - block sizes
-      - target average degree
-      - homophily weight in [0,1]
-
-    We allocate the expected-edge "budget" E across within/between pair sets,
-    then convert expected edges to probabilities. If an extreme is infeasible
-    (e.g., too few within-block pairs to hit avg_degree), we clamp at 1.0.
-    """
-    N = sum(sizes)
-    if N <= 1:
-        return 0.0, 0.0
-
-    max_edges_same = sum(n * (n - 1) / 2 for n in sizes)
-    max_edges_diff = sum(
-        sizes[i] * sizes[j]
-        for i in range(len(sizes))
-        for j in range(i + 1, len(sizes))
-    )
-
-    # Target expected total edges for simple undirected graph.
-    E = N * avg_degree / 2
-
-    # Split the edge budget between same- and diff- type edges.
-    E_same = homophily_weight * E
-    E_diff = (1.0 - homophily_weight) * E
-
-    # Convert expected edges to probabilities (clamp to [0,1]).
-    p_same = 0.0 if max_edges_same == 0 else min(1.0, E_same / max_edges_same)
-    p_diff = 0.0 if max_edges_diff == 0 else min(1.0, E_diff / max_edges_diff)
-
-    return p_same, p_diff
-
-
-
-def per_agent_type_stats(
-    model: IPDModel,
-) -> dict[str, float]:
-    """
-    Compute per-agent-type averages for the current step.
-    Returns a flat dict suitable for a DataFrame row.
-    """
-    from collections import defaultdict
-
-    agent_counts = defaultdict(int)
-    coop_counts = defaultdict(int)
-    decision_counts = defaultdict(int)
-    wealth_sums = defaultdict(float)
-
-    for agent in model.agents:
-        cls = agent.__class__.__name__
-        agent_counts[cls] += 1
-        wealth_sums[cls] += agent.wealth
-        for d in agent.decisions.values():
-            decision_counts[cls] += 1
-            if d == "C":
-                coop_counts[cls] += 1
-
-    row = {}
-    for cls in agent_counts:
-        row[f"{cls}Coop".replace("Agent", "")] = (
-            coop_counts[cls] / decision_counts[cls]
-            if decision_counts[cls] > 0
-            else 0.0
-        )
-        row[f"{cls}$".replace("Agent", "",)] = (
-            wealth_sums[cls] / agent_counts[cls]
-            if agent_counts[cls] > 0
-            else 0.0
-        )
-    return row
-
-
-def serialize_history(history: List[Dict]) -> str:
-
-    choices = {"C": "Cooperated", "D": "Defected"}
-
-    lines: List[str] = [
-        "Here is the history of your interactions with this opponent so far:"
-    ]
-
-    for move in history:
-        step = move["step"]
-        you = choices[move["self_action"]]
-        they = choices[move["other_action"]]
-        lines.append(f"    On move {step}, you {you} and they {they}.")
-
-    text = "\n".join(lines)
-    return text
-
-
-def get_prompt(payoff_matrix, history: List[Dict]) -> str:
-    prompt = f"""
-        You are a player in an Iterated Prisoner's Dilemma game. In each round,
-        you and your opponent will choose to either cooperate or defect. If you
-        both cooperate, you'll both be awarded ${payoff_matrix[('C','C')][0]}.
-        If you cooperate and your opponent defects, you will get
-        ${payoff_matrix[('C','D')][0]} and your opponent will get
-        ${payoff_matrix[('C','D')][1]}. If you defect and your opponent
-        cooperates, you will get ${payoff_matrix[('D','C')][0]} and your
-        opponent will get ${payoff_matrix[('D','C')][1]}. If you both defect,
-        you will both be awarded ${payoff_matrix[('D','D')][0]}.
-    """
-    if not history:
-        prompt += """
-            This is the first iteration of the game (neither player has moved
-            yet).
-        """
-    else:
-        prompt += serialize_history(history)
-
-    prompt += f"""
-        Do you choose to Cooperate, or Defect?
-    """
-    return prompt
-
-
-def start_llm_server():
-    subprocess.Popen(
-        ["bash", "bin/start_llm.sh"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    # Wait until it's good and ready.
-    print("Waiting until ready...")
-    deadline = time.time() + 30   # Give 30 secs
-    while time.time() < deadline:
-        try:
-            r = requests.post(
-                "http://127.0.0.1:8080",
-                json={ "messages": [{"role": "user", "content": "ping"}],
-                    "max_tokens": 1,
-                },
-                 timeout=0.5,
-            )
-            # 503 = model not loaded yet → keep waiting
-            if r.status_code == 503:
-                time.sleep(0.25)
-                continue
-            print("...ready!")
-            return  # server is ready
-        except requests.RequestException:
-            print("...still waiting...")
-            time.sleep(0.25)
-    raise RuntimeError("LLM server did not become ready in time")
-
-def llm_decision(
-    self_node: int,
-    other_node: int,
-    history: List[Dict],
-    payoff_matrix: List[Tuple],
-    persona_prompt: str,
-    step: int,
-) -> str:
-    """
-    Ask an LLM to decide "C" or "D" against a specific neighbor, given that
-    agent's persona prompt and history with that neighbor.
-    """
-    messages = [
-        {"role": "system", "content": persona_prompt +
-            'Respond with exactly one word: "Cooperate" or "Defect".'},
-        {"role": "user", "content": get_prompt(payoff_matrix, history)},
-    ]
-    def do_request() -> requests.Response:
-        r = requests.post(
-            "http://127.0.0.1:8080/v1/chat/completions",
-            json={
-                "messages": messages,
-                "temperature": 0.0,
-                "top_p": 1.0,
-                "stop": ["\n"],
-            },
-            timeout=10,
-        )
-        r.raise_for_status()
-        return r
-
-    try:
-        r = do_request()
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
-        requests.exceptions.HTTPError) as e:
-        print("Starting Llama server...")
-        start_llm_server()
-        r = do_request()  # Retry (once) now that the server's up.
-
-    answer = r.json()["choices"][0]["message"]["content"].strip()
-    if answer not in ["Cooperate","Defect","Cooperate.","Defect."]:
-        raise ValueError(f"LLM didn't follow instructions! Gave '{answer}'.")
-    return answer[0]
-
-
-# ------------------------------------------------------------
-# Agents
-# ------------------------------------------------------------
-class IPDAgent(Agent):
-
-    def __init__(self, model: Model, node: int):
-        super().__init__(model)
-        self.node = node
-        self.current_iter_payment = 0
-
-        # history[other_node] = list of {step, self_action, other_action}
-        self.history = defaultdict(list)
-
-        # decisions[other_node] = action for THIS step only
-        self.decisions = {}
-
-        self.wealth = 0.0
-
-    def record_interaction(
-        self,
-        step: int,
-        other_node: int,
-        self_action: str,
-        other_action: str,
-    ) -> None:
-        self.history[other_node].append(
-            {
-                "step": step,
-                "self_action": self_action,
-                "other_action": other_action,
-            }
-        )
-
-    def decide_against(
-        self,
-        other: "IPDAgent",
-        payoff_matrix: List[Tuple],
-    ) -> tuple[str, str]:
-        """
-        Make a decision against another agent. Return your decision ("C" or
-        "D") and a description of the interaction (for logging).
-        """
-        raise NotImplementedError
-
-    def shape(self) -> str:
-        """
-        Return the shape your node should be in the graph. See:
-        https://matplotlib.org/stable/api/markers_api.html.
-        """
-        raise NotImplementedError
-
-    def step(self) -> None:
-        """
-        Decide your actions for all neighbors (per-neighbor decision making).
-        (Actual payoff resolution is done in the Model.step().)
-        """
-        self.decisions.clear()
-        for nbr in self.model.graph.neighbors(self.node):
-            other = self.model.node_to_agent[nbr]
-            self.decisions[nbr], desc = self.decide_against(other,
-                self.model.payoff_matrix)
-            logging.info(desc)
-
-    def __str__(self) -> str:
-        return (
-            f"Node {self.node} (agent id {self.unique_id}) "
-            f"{self.__class__.__name__} "
-            f"with ${int(self.wealth)}"
-        )
-
-class SuckerAgent(IPDAgent):
-    """Always cooperates."""
-
-    def __init__(self, model: Model, node: int):
-        super().__init__(model, node)
-
-    def decide_against(
-        self,
-        other: "IPDAgent",
-        payoff_matrix: List[Tuple],
-    ) -> tuple[str, str]:
-        log = f"I'm node {self.node} (Sucker), interacting with {other.node}. "
-        log += "(C'ing as always.)"
-        return "C", log
-
-    def shape(self) -> str:
-        return "o"   # Circle = "soft/friendly/harmless" vibe
-
-
-class MeanAgent(IPDAgent):
-    """Always defects."""
-
-    def __init__(self, model: Model, node: int):
-        super().__init__(model, node)
-
-    def decide_against(
-        self,
-        other: "IPDAgent",
-        payoff_matrix: List[Tuple],
-    ) -> tuple[str, str]:
-        log = f"I'm node {self.node} (Mean), interacting with {other.node}. "
-        log += "(D'ing as always.)"
-        return "D", log
-
-    def shape(self) -> str:
-        return "v"   # Down triangle = "mean/aggressive"
-
-
-class TitForTatAgent(IPDAgent):
-    """Classic per-neighbor tit-for-tat (with optional noise)."""
-
-    def __init__(self, model: Model, node: int, noise: float = 0.10):
-        super().__init__(model, node)
-        self.noise = noise
-
-    def decide_against(
-        self,
-        other: "IPDAgent",
-        payoff_matrix: List[Tuple],
-    ) -> tuple[str, str]:
-        log = f"I'm node {self.node} (TFT), interacting with {other.node}. "
-        h = self.history[other.node]
-        if not h:
-            choice = self.model.random.choice(["C", "D"])
-            log += f"It's my first time! ({choice})."
-            return choice, log
-
-        if self.model.random.random() < self.noise:
-            choice = self.model.random.choice(["C", "D"])
-            log += f"I'm going random ({choice})."
-            return choice, log
-
-        log += (f"\n  Last time node {other.node} {h[-1]['other_action']}'d " +
-            f"against me. So I'm {h[-1]['other_action']}'ing them this time.")
-        return h[-1]["other_action"], log
-
-    def shape(self) -> str:
-        return "s"   # Square = "rule-based/fair/predictable"
-
-
-persona_prompts = {
-    'vanilla':
-        "You should choose in a way that tries to maximize your total rewards "
-        "over time.",
-    'tft':
-        "You always do what your opponent did on their most recent move. "
-        "If they defected last time, you defect this time."
-        "If they cooperated last time, you cooperate this time."
-        "If this is the first move of the game, choose randomly.",
-    'cautious':
-        "You are cautious but fair: reciprocate cooperation, punish "
-        "defection, and occasionally forgive to restore cooperation.",
-    'grudge':
-        "You hold grudges for quite a long time. If your opponent ever "
-        "defects, it is several turns before you'll trust them again."
-}
-
-
-class LLMAgent(IPDAgent):
-    """LLM-driven per-neighbor decisions."""
-
-    def __init__(
-        self,
-        model: Model,
-        node: int,
-        persona: str,
-    ):
-        super().__init__(model, node)
-        if persona not in persona_prompts:
-            personas = ", ".join(persona_prompts.keys())
-            raise ValueError(f"{persona} not one of {personas}.")
-        self.persona = persona
-
-    def decide_against(
-        self,
-        other: "IPDAgent",
-        payoff_matrix: List[Tuple],
-    ) -> tuple[str, str]:
-        decision = llm_decision(
-            self_node=self.node,
-            other_node=other.node,
-            history=self.history[other.node],
-            payoff_matrix=payoff_matrix,
-            persona_prompt=persona_prompts[self.persona],
-            step=self.model.steps,  # Mesa 3.x counter (auto-managed)
-        )
-        log = f"I'm node {self.node} (LLM), interacting with {other.node}. "
-        log += f"I'm {decision}'ing."
-        return decision, log
-
-    def shape(self) -> str:
-        return "h"   # Hexagon = "tech/engineered/complex"
-
-
+#---------------------- Simulation and general functions ---------------------
 
 class IPDModel(Model):
     """
@@ -553,9 +72,7 @@ class IPDModel(Model):
         )
         sizes = [ int(round(agent_factory.probs[c] * N)) for c in specs ]
 
-        # ---------------------------------------------------------------
-        # 2) Compute SBM probabilities from avg_degree + homophily_weight
-        # ---------------------------------------------------------------
+        # Compute SBM probabilities from avg_degree + homophily_weight.
         p_same, p_diff = compute_sbm_probs(
             sizes=sizes,
             avg_degree=avg_degree,
@@ -567,9 +84,7 @@ class IPDModel(Model):
         for i in range(k):
             p[i][i] = p_same
 
-        # ------------------------------------------------------------
-        # 3) Build SBM graph (nodes grouped by block)
-        # ------------------------------------------------------------
+        # Build SBM graph (nodes grouped by block).
 
         # The graph seed might have to dynamically change, since the provided
         # seed might not produce a connected graph. So, for cleanliness, keep
@@ -617,7 +132,6 @@ class IPDModel(Model):
         # Peace of mind that node IDs and agent IDs haven't drifted weirdly.
         assert set(self.node_to_agent.keys()) == set(self.graph.nodes)
         assert all(a.node == n for n, a in self.node_to_agent.items())
-
 
     def assortativity(self) -> float:
         """
@@ -762,7 +276,6 @@ class IPDModel(Model):
         self.fig.canvas.flush_events()
         time.sleep(0.01)
 
-
     def __str__(self):
         ret_val = "with this agent mix:\n"
         am = [ f"{c:>18}:{n:>5}" for c, n in self.agent_mix().items() ]
@@ -771,6 +284,653 @@ class IPDModel(Model):
         ret_val += f"and assortativity {self.assortativity():.3f}."
         return ret_val
 
+
+def per_agent_type_stats(
+    model: IPDModel,
+) -> dict[str, float]:
+    """
+    Compute per-agent-type averages for the current step.
+    Returns a flat dict suitable for a DataFrame row.
+    """
+    from collections import defaultdict
+
+    agent_counts = defaultdict(int)
+    coop_counts = defaultdict(int)
+    decision_counts = defaultdict(int)
+    wealth_sums = defaultdict(float)
+
+    for agent in model.agents:
+        cls = agent.__class__.__name__
+        agent_counts[cls] += 1
+        wealth_sums[cls] += agent.wealth
+        for d in agent.decisions.values():
+            decision_counts[cls] += 1
+            if d == "C":
+                coop_counts[cls] += 1
+
+    row = {}
+    for cls in agent_counts:
+        row[f"{cls}Coop".replace("Agent", "")] = (
+            coop_counts[cls] / decision_counts[cls]
+            if decision_counts[cls] > 0
+            else 0.0
+        )
+        row[f"{cls}$".replace("Agent", "",)] = (
+            wealth_sums[cls] / agent_counts[cls]
+            if agent_counts[cls] > 0
+            else 0.0
+        )
+    return row
+
+
+def compute_sbm_probs(
+    sizes: list[int],
+    avg_degree: float,
+    homophily_weight: float,   # 0 = only diff-type edges; 1 = only same-type
+) -> tuple[float, float]:
+    """
+    Compute (p_same, p_diff) for a vanilla SBM with:
+      - block sizes
+      - target average degree
+      - homophily weight in [0,1]
+
+    We allocate the expected-edge "budget" E across within/between pair sets,
+    then convert expected edges to probabilities. If an extreme is infeasible
+    (e.g., too few within-block pairs to hit avg_degree), we clamp at 1.0.
+    """
+    N = sum(sizes)
+    if N <= 1:
+        return 0.0, 0.0
+
+    max_edges_same = sum(n * (n - 1) / 2 for n in sizes)
+    max_edges_diff = sum(
+        sizes[i] * sizes[j]
+        for i in range(len(sizes))
+        for j in range(i + 1, len(sizes))
+    )
+
+    # Target expected total edges for simple undirected graph.
+    E = N * avg_degree / 2
+
+    # Split the edge budget between same- and diff- type edges.
+    E_same = homophily_weight * E
+    E_diff = (1.0 - homophily_weight) * E
+
+    # Convert expected edges to probabilities (clamp to [0,1]).
+    p_same = 0.0 if max_edges_same == 0 else min(1.0, E_same / max_edges_same)
+    p_diff = 0.0 if max_edges_diff == 0 else min(1.0, E_diff / max_edges_diff)
+
+    return p_same, p_diff
+
+
+def start_llm_server():
+    subprocess.Popen(
+        ["bash", "bin/start_llm.sh"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    # Wait until it's good and ready.
+    print("Waiting until ready...")
+    deadline = time.time() + 30   # Give 30 secs
+    while time.time() < deadline:
+        try:
+            r = requests.post(
+                "http://127.0.0.1:8080",
+                json={ "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
+                 timeout=0.5,
+            )
+            # 503 = model not loaded yet → keep waiting
+            if r.status_code == 503:
+                time.sleep(0.25)
+                continue
+            print("...ready!")
+            return  # server is ready
+        except requests.RequestException:
+            print("...still waiting...")
+            time.sleep(0.25)
+    raise RuntimeError("LLM server did not become ready in time")
+
+
+def estimate_expected_avg_wealth(g: nx.Graph):
+    """
+    Completely back-of-the-envelope estimate of "about how much should each
+    agent expect to win during this situation?" The crude formula assumes an
+    independent 50/50 chance of choosing to defect or cooperate.
+    Note that we compute "per_iter" here (not "per_encounter") because we're
+    discounting each agent's per-iteration winnings by its degree (which is its
+    number of encounters).
+    """
+    avg_agent_per_iter = .25 * (args.R + args.T + args.S + args.P)
+    return avg_agent_per_iter * args.num_iter
+
+
+def print_stats(stats: pl.DataFrame, last_n=20):
+    cols = stats.columns
+
+    things = sorted({
+        re.sub(r"(Coop|\$)$", "", c)
+        for c in cols
+        if c.endswith("Coop") or c.endswith("$")
+    })
+
+    ordered = (
+        [f"{t}Coop" for t in things if f"{t}Coop" in cols] +
+        [f"{t}$"    for t in things if f"{t}$"    in cols]
+    )
+
+    other = [c for c in cols if c not in ordered]
+
+    stats = stats.select(other + ordered)
+
+    with pl.Config(
+        tbl_hide_dataframe_shape=True,
+        tbl_hide_column_data_types=True,
+        float_precision=2,
+        tbl_cell_numeric_alignment="RIGHT",
+    ):
+        print(stats.tail(last_n))
+
+
+#--------------------------- Agent generation -------------------------------
+
+class IPDAgent(Agent):
+
+    def __init__(self, model: Model, node: int):
+        super().__init__(model)
+        self.node = node
+        self.current_iter_payment = 0
+
+        # history[other_node] = list of {step, self_action, other_action}
+        self.history = defaultdict(list)
+
+        # decisions[other_node] = action for THIS step only
+        self.decisions = {}
+
+        self.wealth = 0.0
+
+    def record_interaction(
+        self,
+        step: int,
+        other_node: int,
+        self_action: str,
+        other_action: str,
+    ) -> None:
+        self.history[other_node].append(
+            {
+                "step": step,
+                "self_action": self_action,
+                "other_action": other_action,
+            }
+        )
+
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
+        """
+        Make a decision against another agent. Return your decision ("C" or
+        "D") and a description of the interaction (for logging).
+        """
+        raise NotImplementedError
+
+    def shape(self) -> str:
+        """
+        Return the shape your node should be in the graph. See:
+        https://matplotlib.org/stable/api/markers_api.html.
+        """
+        raise NotImplementedError
+
+    def step(self) -> None:
+        """
+        Decide your actions for all neighbors (per-neighbor decision making).
+        (Actual payoff resolution is done in the Model.step().)
+        """
+        self.decisions.clear()
+        for nbr in self.model.graph.neighbors(self.node):
+            other = self.model.node_to_agent[nbr]
+            self.decisions[nbr], desc = self.decide_against(other,
+                self.model.payoff_matrix)
+            logging.info(desc)
+
+    def __str__(self) -> str:
+        return (
+            f"Node {self.node} (agent id {self.unique_id}) "
+            f"{self.__class__.__name__} "
+            f"with ${int(self.wealth)}"
+        )
+
+
+def resolve_agent_spec(
+    name: str,
+    args: argparse.Namespace,
+) -> tuple[type, dict]:
+    """
+    Map an Agent classname fragment to (AgentClass, init_kwargs).
+
+    Examples:
+      "Sucker"      -> (SuckerAgent, {})
+      "Mean"        -> (MeanAgent, {})
+      "LLMgrudge"   -> (LLMAgent, {"persona": "grudge"})
+      "LLMvanilla"  -> (LLMAgent, {"persona": "vanilla"})
+    """
+    if name == "TitForTat":
+        return TitForTatAgent, {"noise": args.tft_noise}
+
+    if name.startswith("LLM"):
+        persona = name[3:].lower()
+        if persona not in personas:
+            persona_names = ", ".join(personas)
+            raise ValueError(
+                f"Unknown LLM persona {persona!r}. Must be one of "
+                f"{persona_names}."
+            )
+        return LLMAgent, {"persona": persona}
+
+    try:
+        return globals()[name + "Agent"], {}
+    except KeyError as e:
+        raise ValueError(f"Unknown agent type {name!r}") from e
+
+
+@dataclass(frozen=True, slots=True)
+class AgentFactory:
+    probs: Mapping[tuple[type, tuple[tuple[str, object], ...]], float]
+
+    @classmethod
+    def instance(cls, tokens: list[str], args) -> "AgentFactory":
+        """
+        This singleton method expects a list of strings, which are alternating
+        agent name fragments and probabilities on the simplex. Example:
+        ['Sucker', '0.4', 'Mean', '0.4', 'LLMgrudge', '0.2']. 
+        """
+        if not tokens or len(tokens) % 2 != 0:
+            raise ValueError("--agent-fracs must be AGENT FRAC pairs")
+
+        probs: dict[tuple[type, tuple[tuple[str, object], ...]], float] = {}
+
+        it = iter(tokens)
+        for name, frac_str in zip(it, it):
+            agent_cls, kwargs = resolve_agent_spec(name, args)
+            frac = float(frac_str)
+            key = (agent_cls, tuple(kwargs.items()))
+            probs[key] = frac
+
+        return cls(probs)
+
+    def __post_init__(self) -> None:
+        s = sum(self.probs.values())
+        if not math.isclose(abs(sum(self.probs.values())), 1.0):
+            raise ValueError(f"Probabilities must sum to 1.0, got {s}")
+
+    def plan_agent_specs(
+        self,
+        n_agents: int,
+        rng: py_random.Random,
+    ) -> list[tuple[type, dict]]:
+        """
+        Return a list of agent specifications of length n_agents. Each such
+        specification is a tuple of an Agent subclass type, and a dict of any
+        initialization args it needs.
+        """
+        plan: list[tuple[type, dict]] = []
+
+        counts = {
+            spec: int(round(p * n_agents))
+            for spec, p in self.probs.items()
+        }
+
+        # Fix rounding drift.
+        while sum(counts.values()) != n_agents:
+            diff = n_agents - sum(counts.values())
+            spec = max(self.probs, key=self.probs.get)
+            counts[spec] += diff
+
+        for (cls, kwargs_items), k in counts.items():
+            kwargs = dict(kwargs_items)
+            plan.extend([(cls, kwargs)] * k)
+
+        rng.shuffle(plan)
+        return plan
+
+
+#--------------------------- Rule-based agents -------------------------------
+
+class SuckerAgent(IPDAgent):
+    """Always cooperates."""
+
+    def __init__(self, model: Model, node: int):
+        super().__init__(model, node)
+
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
+        log = f"I'm node {self.node} (Sucker), interacting with {other.node}. "
+        log += "(C'ing as always.)"
+        return "C", log
+
+    def shape(self) -> str:
+        return "o"   # Circle = "soft/friendly/harmless" vibe
+
+
+class MeanAgent(IPDAgent):
+    """Always defects."""
+
+    def __init__(self, model: Model, node: int):
+        super().__init__(model, node)
+
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
+        log = f"I'm node {self.node} (Mean), interacting with {other.node}. "
+        log += "(D'ing as always.)"
+        return "D", log
+
+    def shape(self) -> str:
+        return "v"   # Down triangle = "mean/aggressive"
+
+
+class TitForTatAgent(IPDAgent):
+    """Classic per-neighbor tit-for-tat (with optional noise)."""
+
+    def __init__(self, model: Model, node: int, noise: float = 0.10):
+        super().__init__(model, node)
+        self.noise = noise
+
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
+        log = f"I'm node {self.node} (TFT), interacting with {other.node}. "
+        h = self.history[other.node]
+        if not h:
+            choice = self.model.random.choice(["C", "D"])
+            log += f"It's my first time! ({choice})."
+            return choice, log
+
+        if self.model.random.random() < self.noise:
+            choice = self.model.random.choice(["C", "D"])
+            log += f"I'm going random ({choice})."
+            return choice, log
+
+        log += (f"\n  Last time node {other.node} {h[-1]['other_action']}'d " +
+            f"against me. So I'm {h[-1]['other_action']}'ing them this time.")
+        return h[-1]["other_action"], log
+
+    def shape(self) -> str:
+        return "s"   # Square = "rule-based/fair/predictable"
+
+
+#------------------------------- LLM Agents -----------------------------------
+
+class AgentMode(Enum):
+    MECHANISTIC = auto()   # Rule-bound and deterministic.
+    DELIBERATIVE = auto()  # Autonomous, strategic, social, free to interpret.
+
+@dataclass(frozen=True)
+class Persona:
+    system: str        # Strategy description.
+    mode: AgentMode    # Strategy description.
+    sees_payoffs: bool
+
+personas = {
+    'tft': Persona(
+        system=textwrap.dedent("""
+            Your behavior is fixed: you must exactly repeat your opponent's
+            most recent action. If this is the first move, choose randomly.
+            """
+        ).strip(),
+        mode=AgentMode.MECHANISTIC,
+        sees_payoffs=False,
+    ),
+            
+    'vanilla': Persona(
+        system = textwrap.dedent("""
+            You should choose in a way that tries to maximize your total
+            rewards over time.
+            """
+        ).strip(),
+        mode=AgentMode.DELIBERATIVE,
+        sees_payoffs=True,
+    ),
+}
+
+def serialize_summary(history: List[Dict]) -> str:
+    if not history:
+        return "Summary: This is the first move of the game."
+
+    last = history[-1]
+    return (
+        "Summary:\n"
+        f"Opponent's most recent action: {last['other_action']}"
+    )
+
+def serialize_history(history: List[Dict]) -> str:
+    if not history:
+        return textwrap.dedent("""
+            This is the first iteration of the game (neither player has moved
+            yet).
+        """).strip()
+
+    choices = {"C": "Cooperated", "D": "Defected"}
+
+    lines: List[str] = [
+        "Here is the history of your interactions with this opponent so far:"
+    ]
+
+    for move in history:
+        step = move["step"]
+        you = choices[move["self_action"]]
+        they = choices[move["other_action"]]
+        lines.append(f"    On move {step}, you {you} and they {they}.")
+
+    text = "\n".join(lines)
+    return text
+
+def serialize_payoffs(
+    payoff_matrix: Dict[Tuple[str, str], Tuple[float, float]],
+) -> str:
+    """
+    payoff_matrix maps (your_action, opponent_action) -> (your_payoff,
+    opponent_payoff) where actions are "C" (Cooperate) or "D" (Defect).
+    """
+    return (
+        "Payoff matrix:\n"
+        "Actions: C = Cooperate, D = Defect\n\n"
+        f"If you choose C and your opponent chooses C: "
+        f"you get {payoff_matrix[('C','C')][0]}, "
+        f"your opponent gets {payoff_matrix[('C','C')][1]}.\n"
+        f"If you choose C and your opponent chooses D: "
+        f"you get {payoff_matrix[('C','D')][0]}, "
+        f"your opponent gets {payoff_matrix[('C','D')][1]}.\n"
+        f"If you choose D and your opponent chooses C: "
+        f"you get {payoff_matrix[('D','C')][0]}, "
+        f"your opponent gets {payoff_matrix[('D','C')][1]}.\n"
+        f"If you choose D and your opponent chooses D: "
+        f"you get {payoff_matrix[('D','D')][0]}, "
+        f"your opponent gets {payoff_matrix[('D','D')][1]}."
+    )
+
+IPD_WORLD_PROMPT = textwrap.dedent("""
+You are a player in an Iterated Prisoner's Dilemma game.
+
+In each round, you and your opponent each choose exactly one action: Cooperate
+or Defect. You and your opponent will each receive rewards based on your
+actions, according to a payoff matrix.
+
+The game is repeated with the same opponent over multiple rounds.
+""").strip()
+
+
+SYSTEM_PROMPT_MECHANISTIC = "\n\n".join([
+    IPD_WORLD_PROMPT,
+    textwrap.dedent("""
+    You are a deterministic agent in this simulation.
+    You must follow your behavioral rules exactly.
+    You must not reinterpret your goals or constraints.
+    You are not role-playing or persuading.
+    Your output must be exactly one word: Cooperate or Defect.
+    """).strip(),
+])
+
+SYSTEM_PROMPT_DELIBERATIVE = "\n\n".join([
+    IPD_WORLD_PROMPT,
+    textwrap.dedent("""
+    You are an autonomous agent in a computer simulation.
+    You may reason, strategize, persuade, and role-play
+    according to your persona.
+    Your output must be exactly one word: Cooperate or Defect.
+    """).strip()
+])
+
+def get_prompt(payoff_matrix, history: List[Dict]) -> str:
+    prompt = textwrap.dedent(f"""
+        You are a player in an Iterated Prisoner's Dilemma game. In each round,
+        you and your opponent will choose to either cooperate or defect. If you
+        both cooperate, you'll both be awarded ${payoff_matrix[('C','C')][0]}.
+        If you cooperate and your opponent defects, you will get
+        ${payoff_matrix[('C','D')][0]} and your opponent will get
+        ${payoff_matrix[('C','D')][1]}. If you defect and your opponent
+        cooperates, you will get ${payoff_matrix[('D','C')][0]} and your
+        opponent will get ${payoff_matrix[('D','C')][1]}. If you both defect,
+        you will both be awarded ${payoff_matrix[('D','D')][0]}.
+    """).strip()
+    if not history:
+        prompt += """
+            This is the first iteration of the game (neither player has moved
+            yet).
+        """
+    else:
+        prompt += serialize_history(history)
+
+    prompt += textwrap.dedent(f"""
+        Do you choose to Cooperate, or Defect?
+    """).strip()
+    return prompt
+
+
+def llm_decision(
+    self_node: int,
+    other_node: int,
+    history: List[Dict],
+    payoff_matrix: List[Tuple],
+    persona: Persona,
+    step: int,
+) -> str:
+    """
+    Ask an LLM to decide "C" or "D" against a specific neighbor, given that
+    agent's persona prompt and history with that neighbor.
+    """
+    base_system = (
+        SYSTEM_PROMPT_MECHANISTIC
+        if persona.mode is AgentMode.MECHANISTIC
+        else SYSTEM_PROMPT_DELIBERATIVE
+    )
+
+    system_prompt = "\n\n".join([
+        base_system,
+        persona.system,
+    ])
+
+    user_parts = [
+        serialize_summary(history),
+        serialize_history(history),
+        "What is your action this round?",
+    ]
+
+    if persona.mode is AgentMode.DELIBERATIVE:
+        user_parts.append(serialize_history(history))
+
+    if persona.sees_payoffs:
+        user_parts.append(serialize_payoffs(payoff_matrix))
+
+    user_parts.append("What is your action this round?")
+
+    user_prompt = "\n\n".join(user_parts)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    def do_request() -> requests.Response:
+        r = requests.post(
+            "http://127.0.0.1:8080/v1/chat/completions",
+            json={
+                "messages": messages,
+                "temperature": 0.0,
+                "top_p": 1.0,
+                "stop": ["\n"],
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r
+
+    try:
+        r = do_request()
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+        requests.exceptions.HTTPError) as e:
+        print("Starting Llama server...")
+        start_llm_server()
+        r = do_request()  # Retry (once) now that the server's up.
+
+    answer = r.json()["choices"][0]["message"]["content"].strip()
+    if answer not in ["Cooperate","Defect","Cooperate.","Defect."]:
+        raise ValueError(f"LLM didn't follow instructions! Gave '{answer}'.")
+    #if self_node == 0 and other_node == 10:
+        #print(f"Here's the hist so far: {history}")
+        #print(f"{len(history)}: {self_node}'s answer to {other_node} is {answer}")
+        
+        #import ipdb ; ipdb.set_trace()
+    return answer[0]
+
+
+class LLMAgent(IPDAgent):
+    """LLM-driven per-neighbor decisions."""
+
+    def __init__(
+        self,
+        model: Model,
+        node: int,
+        persona: str,
+    ):
+        super().__init__(model, node)
+        if persona not in personas:
+            persona_names = ", ".join(personas.keys())
+            raise ValueError(f"{persona} not one of {persona_names}.")
+        self.persona = persona
+
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: List[Tuple],
+    ) -> tuple[str, str]:
+        decision = llm_decision(
+            self_node=self.node,
+            other_node=other.node,
+            history=self.history[other.node],
+            payoff_matrix=payoff_matrix,
+            persona=personas[self.persona],
+            step=self.model.steps,  # Mesa 3.x counter (auto-managed)
+        )
+        log = f"I'm node {self.node} (LLM), interacting with {other.node}. "
+        log += f"I'm {decision}'ing."
+        return decision, log
+
+    def shape(self) -> str:
+        return "h"   # Hexagon = "tech/engineered/complex"
+
+
+#----------------------------------- main ------------------------------------
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -807,7 +967,7 @@ def parse_args():
         default=0.0,
     )
     agent_types = ["Sucker", "Mean", "TitForTat"]
-    agent_types += [f"LLM{p}" for p in persona_prompts]
+    agent_types += [f"LLM{p}" for p in personas]
     parser.add_argument(
         "--agent-fracs",
         nargs="+",
@@ -881,48 +1041,6 @@ def parse_args():
     return args
 
 
-
-def estimate_expected_avg_wealth(g: nx.Graph):
-    """
-    Completely back-of-the-envelope estimate of "about how much should each
-    agent expect to win during this situation?" The crude formula assumes an
-    independent 50/50 chance of choosing to defect or cooperate.
-    Note that we compute "per_iter" here (not "per_encounter") because we're
-    discounting each agent's per-iteration winnings by its degree (which is its
-    number of encounters).
-    """
-    avg_agent_per_iter = .25 * (args.R + args.T + args.S + args.P)
-    return avg_agent_per_iter * args.num_iter
-
-
-
-def print_stats(stats: pl.DataFrame, last_n=20):
-    cols = stats.columns
-
-    things = sorted({
-        re.sub(r"(Coop|\$)$", "", c)
-        for c in cols
-        if c.endswith("Coop") or c.endswith("$")
-    })
-
-    ordered = (
-        [f"{t}Coop" for t in things if f"{t}Coop" in cols] +
-        [f"{t}$"    for t in things if f"{t}$"    in cols]
-    )
-
-    other = [c for c in cols if c not in ordered]
-
-    stats = stats.select(other + ordered)
-
-    with pl.Config(
-        tbl_hide_dataframe_shape=True,
-        tbl_hide_column_data_types=True,
-        float_precision=2,
-        tbl_cell_numeric_alignment="RIGHT",
-    ):
-        print(stats.tail(last_n))
-
-
 def interact_with_model(m: IPDModel):
 
     def node_prompt(m):
@@ -964,6 +1082,7 @@ def interact_with_model(m: IPDModel):
                 node_num_str = input(neigh_prompt(m,n))
 
         node_num_str = input(node_prompt(m))
+
 
 if __name__ == "__main__":
 
