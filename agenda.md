@@ -2,6 +2,8 @@
 
 ## Bug fixes
 
+- [ ] Why do LLMtft's do worse than TFT's? Shouldn't they be the same?
+
 ## Diagnostics
 
 - [x] Add agent query mode, where you can interactively type a node number and
