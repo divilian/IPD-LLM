@@ -15,8 +15,10 @@ Run syntax:
 
 from __future__ import annotations
 
-import textwrap
+import asyncio
 import requests
+import httpx
+import textwrap
 import subprocess
 from tqdm import tqdm
 import re
@@ -256,78 +258,127 @@ def get_prompt(payoff_matrix, history: List[Dict]) -> str:
     return prompt
 
 
-def start_llm_server():
-    subprocess.Popen(
-        ["bash", "bin/start_llm.sh"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    # Wait until it's good and ready.
-    print("Waiting until ready...")
-    deadline = time.time() + 30   # Give 30 secs
-    while time.time() < deadline:
-        try:
-            r = requests.post(
-                "http://127.0.0.1:8080",
-                json={ "messages": [{"role": "user", "content": "ping"}],
-                    "max_tokens": 1,
-                },
-                 timeout=0.5,
-            )
-            # 503 = model not loaded yet → keep waiting
-            if r.status_code == 503:
-                time.sleep(0.25)
-                continue
-            print("...ready!")
-            return  # server is ready
-        except requests.RequestException:
-            print("...still waiting...")
-            time.sleep(0.25)
-    raise RuntimeError("LLM server did not become ready in time")
+def ensure_ollama_running(ollama_model: str):
+    """
+    Ensure Ollama daemon is running and the required model is available.
+    If daemon is not running, start it.
+    If model is not present, pull it.
+    """
 
-def llm_decision(
+    def daemon_alive() -> bool:
+        try:
+            r = requests.get(
+                "http://127.0.0.1:11434/api/tags",
+                timeout=0.5,
+            )
+            return r.status_code == 200
+        except requests.RequestException:
+            return False
+
+    # Start daemon (if needed).
+    if not daemon_alive():
+        print("Starting Ollama daemon...")
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if daemon_alive():
+                print("Ollama daemon is ready.")
+                break
+            time.sleep(0.25)
+        else:
+            raise RuntimeError(
+                "Ollama daemon did not start within 30 seconds."
+            )
+
+    # Ensure model is available.
+    r = requests.get(
+        "http://127.0.0.1:11434/api/tags",
+        timeout=2.0,
+    )
+    r.raise_for_status()
+
+    available_models = {
+        m["name"]
+        for m in r.json().get("models", [])
+    }
+
+    if ollama_model not in available_models:
+        print(f"Model '{ollama_model}' not found locally.")
+        print("Pulling model from Ollama registry...")
+        subprocess.run(
+            ["ollama", "pull", ollama_model],
+            check=True,
+        )
+        print("Model pull complete.")
+
+
+async def llm_decision(
     self_node: int,
     other_node: int,
     history: List[Dict],
     payoff_matrix: List[Tuple],
-    persona_prompt: str,
+    persona: Persona,
+    ollama_model_name: str,
     step: int,
 ) -> str:
     """
     Ask an LLM to decide "C" or "D" against a specific neighbor, given that
     agent's persona prompt and history with that neighbor.
     """
-    messages = [
-        {"role": "system", "content": persona_prompt +
-            'Respond with exactly one word: "Cooperate" or "Defect".'},
-        {"role": "user", "content": get_prompt(payoff_matrix, history)},
+    base_system = (
+        SYSTEM_PROMPT_MECHANISTIC
+        if persona.mode is AgentMode.MECHANISTIC
+        else SYSTEM_PROMPT_DELIBERATIVE
+    )
+
+    system_prompt = "\n\n".join([
+        base_system,
+        persona.system,
+    ])
+
+    user_parts = [
+        serialize_summary(history),
+        serialize_history(history),
     ]
-    def do_request() -> requests.Response:
-        r = requests.post(
-            "http://127.0.0.1:8080/v1/chat/completions",
+
+    if persona.sees_payoffs:
+        user_parts.append(serialize_payoffs(payoff_matrix))
+
+    user_parts.append("What is your action this round?")
+
+    user_prompt = "\n\n".join(user_parts)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(
+            "http://127.0.0.1:11434/api/chat",
             json={
+                "model": ollama_model_name,
                 "messages": messages,
                 "temperature": 0.0,
                 "top_p": 1.0,
                 "stop": ["\n"],
+                "max_tokens": 3,
+                "stream": False
             },
-            timeout=10,
         )
         r.raise_for_status()
-        return r
 
-    try:
-        r = do_request()
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
-        requests.exceptions.HTTPError) as e:
-        print("Starting Llama server...")
-        start_llm_server()
-        r = do_request()  # Retry (once) now that the server's up.
+    answer = r.json()["message"]["content"].strip()
 
-    answer = r.json()["choices"][0]["message"]["content"].strip()
     if answer not in ["Cooperate","Defect","Cooperate.","Defect."]:
         raise ValueError(f"LLM didn't follow instructions! Gave '{answer}'.")
+
     return answer[0]
 
 
@@ -509,14 +560,7 @@ class LLMAgent(IPDAgent):
         other: "IPDAgent",
         payoff_matrix: List[Tuple],
     ) -> tuple[str, str]:
-        decision = llm_decision(
-            self_node=self.node,
-            other_node=other.node,
-            history=self.history[other.node],
-            payoff_matrix=payoff_matrix,
-            persona_prompt=persona_prompts[self.persona],
-            step=self.model.steps,  # Mesa 3.x counter (auto-managed)
-        )
+        decision = self.model._llm_decisions[(self_node,other.node)]
         log = f"I'm node {self.node} (LLM), interacting with {other.node}. "
         log += f"I'm {decision}'ing."
         return decision, log
@@ -539,6 +583,7 @@ class IPDModel(Model):
         homophily_weight: float,
         payoff_matrix: List[Tuple],
         agent_factory: AgentFactory,
+        ollama_model_name: str,
         seed: int,
     ):
         super().__init__(seed=seed)
@@ -546,6 +591,7 @@ class IPDModel(Model):
         self.N = N
         self.seed = seed
         self.payoff_matrix = payoff_matrix
+        self.ollama_model_name = ollama_model_name
 
         # Distinct specs = SBM blocks (stable order)
         specs = sorted(
@@ -642,23 +688,69 @@ class IPDModel(Model):
         return coop / total if total else 0.0
 
     def step(self) -> None:
+        asyncio.run(self._step_async())
+
+    async def _step_async(self) -> None:
         """
         One tick:
-        1) Agents decide per neighbor (random activation order)
+        1) Agents decide per neighbor (LLM decisions async)
         2) Resolve each edge once using those dyadic decisions
         3) Record dyadic history + collect data
         """
         # Reset payment totals for this new round.
         for a in self.agents:
             a.current_iter_payment = 0.0
+            a.decisions.clear()
 
-        # Tell each agent to make its decision.
-        self.agents.shuffle_do("step")
+        llm_tasks = {}
+        self._llm_decisions = {}
 
-        # Now, for each game that was played, record it and tally its winnings.
-        # (Only play each game once; we arbitrarily decide to have the lower
-        # numbered agent be player A and the other player B, since that's the
-        # direction that netx stores the undirected edge.)
+        # Phase 1: prepare LLM calls
+        for agent in self.agents:
+            if isinstance(agent, LLMAgent):
+                # Prepare calls for all LLM agents.
+                for nbr in self.graph.neighbors(agent.node):
+                    other = self.node_to_agent[nbr]
+                    llm_tasks[(agent.node, nbr)] = llm_decision(
+                        self_node=agent.node,
+                        other_node=other.node,
+                        history=agent.history[nbr],
+                        payoff_matrix=self.payoff_matrix,
+                        persona=personas[agent.persona],
+                        ollama_model_name=self.ollama_model_name,
+                        step=self.steps,
+                    )
+            else:
+                # Rule-based agents compute immediately.
+                for nbr in self.graph.neighbors(agent.node):
+                    other = self.node_to_agent[nbr]
+                    decision, desc = agent.decide_against(
+                        other,
+                        self.payoff_matrix
+                    )
+                    agent.decisions[nbr] = decision
+                    logging.info(desc)
+                
+        # Phase 2: await all LLM decisions.
+        if llm_tasks:
+            results = await asyncio.gather(*llm_tasks.values())
+            for key, decision in zip(llm_tasks.keys(), results):
+                self._llm_decisions[key] = decision
+
+        # Phase 3: assign LLM decisions.
+        for (node, nbr), decision in self._llm_decisions.items():
+            agent = self.node_to_agent[node]
+            agent.decisions[nbr] = decision
+            logging.info(
+                f"I'm node {node} (LLM), interacting with {nbr}. "
+                f"I'm {decision}'ing."
+            )
+
+        # Phase 4: resolve payoffs. For each game that was played, record it
+        # and tally its winnings. (Only play each game once; we arbitrarily
+        # decide to have the lower numbered agent be player A and the other
+        # player B, since that's the direction that netx stores the undirected
+        # edge.)
         for i, j in self.graph.edges:
             ai = self.node_to_agent[i]
             aj = self.node_to_agent[j]
@@ -1299,83 +1391,6 @@ def get_prompt(payoff_matrix, history: List[Dict]) -> str:
     return prompt
 
 
-def llm_decision(
-    self_node: int,
-    other_node: int,
-    history: List[Dict],
-    payoff_matrix: List[Tuple],
-    persona: Persona,
-    step: int,
-) -> str:
-    """
-    Ask an LLM to decide "C" or "D" against a specific neighbor, given that
-    agent's persona prompt and history with that neighbor.
-    """
-    base_system = (
-        SYSTEM_PROMPT_MECHANISTIC
-        if persona.mode is AgentMode.MECHANISTIC
-        else SYSTEM_PROMPT_DELIBERATIVE
-    )
-
-    system_prompt = "\n\n".join([
-        base_system,
-        persona.system,
-    ])
-
-    user_parts = [
-        serialize_summary(history),
-        serialize_history(history),
-        "What is your action this round?",
-    ]
-
-    if persona.mode is AgentMode.DELIBERATIVE:
-        user_parts.append(serialize_history(history))
-
-    if persona.sees_payoffs:
-        user_parts.append(serialize_payoffs(payoff_matrix))
-
-    user_parts.append("What is your action this round?")
-
-    user_prompt = "\n\n".join(user_parts)
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    def do_request() -> requests.Response:
-        r = requests.post(
-            "http://127.0.0.1:8080/v1/chat/completions",
-            json={
-                "messages": messages,
-                "temperature": 0.0,
-                "top_p": 1.0,
-                "stop": ["\n"],
-            },
-            timeout=10,
-        )
-        r.raise_for_status()
-        return r
-
-    try:
-        r = do_request()
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
-        requests.exceptions.HTTPError) as e:
-        print("Starting Llama server...")
-        start_llm_server()
-        r = do_request()  # Retry (once) now that the server's up.
-
-    answer = r.json()["choices"][0]["message"]["content"].strip()
-    if answer not in ["Cooperate","Defect","Cooperate.","Defect."]:
-        raise ValueError(f"LLM didn't follow instructions! Gave '{answer}'.")
-    #if self_node == 0 and other_node == 10:
-        #print(f"Here's the hist so far: {history}")
-        #print(f"{len(history)}: {self_node}'s answer to {other_node} is {answer}")
-        
-        #import ipdb ; ipdb.set_trace()
-    return answer[0]
-
-
 class LLMAgent(IPDAgent):
     """LLM-driven per-neighbor decisions."""
 
@@ -1396,6 +1411,7 @@ class LLMAgent(IPDAgent):
         other: "IPDAgent",
         payoff_matrix: List[Tuple],
     ) -> tuple[str, str]:
+        import sys ; sys.exit("Here we are!!!")
         decision = llm_decision(
             self_node=self.node,
             other_node=other.node,
@@ -1495,6 +1511,12 @@ def parse_args():
         help="TitForTatAgent noise rate in [0,1]. (default 0.10)",
     )
     parser.add_argument(
+        "--ollama-model",
+        type=str,
+        default="llama3.1:latest",
+        help="Ollama model to use for LLM agents."
+    )
+    parser.add_argument(
         "--plot",
         action="store_true",
         help="Plot animation."
@@ -1570,6 +1592,8 @@ if __name__ == "__main__":
 
     args = parse_args()
 
+    ensure_ollama_running(args.ollama_model)
+
     logging.basicConfig(
         level=args.log_level,
         format="%(message)s"
@@ -1597,6 +1621,7 @@ if __name__ == "__main__":
         homophily_weight=args.homophily_weight,
         payoff_matrix=payoff_matrix,
         agent_factory=factory,
+        ollama_model_name=args.ollama_model,
         seed=args.seed,
     )
     print(f"Running {m}")
