@@ -281,12 +281,25 @@ class IPDAgent(Agent):
             )
             logging.info(desc)
 
+    def decision_context(self) -> dict:
+        """
+        Return a dict to send to the LLM representing this agent. It should
+        include only things relevant to it making its decision.
+        Note: this default behavior is intended to be overridden by subclasses
+        who need (say) history information.
+        """
+        return {
+            "id": self.node,   # use node, not unique_id
+            "persona": self.persona,
+        }
+
     def __str__(self) -> str:
         return (
             f"Node {self.node} (agent id {self.unique_id}) "
             f"{self.__class__.__name__} "
             f"with ${int(self.wealth)}"
         )
+
 
 
 #--------------------------- Rule-based agents -------------------------------
@@ -369,32 +382,52 @@ class AgentMode(Enum):
     MECHANISTIC = auto()   # Rule-bound and deterministic.
     DELIBERATIVE = auto()  # Autonomous, strategic, social, free to interpret.
 
+class HistoryType(Enum):
+    NONE = auto()    # for agents who don't need any history provided
+    LAST = auto()    # for agents who need to know their opponents's last move
+    FULL = auto()    # for agents who need the full history to decide move
+
 
 @dataclass(frozen=True)
 class Persona:
-    system: str        # Strategy description.
-    mode: AgentMode    # Strategy description.
+    instructions: str     # Strategy description.
+    mode: AgentMode       # What kind of agent is this
+    history: HistoryType  # How much stuff needs to go in the prompt
     sees_payoffs: bool
 
 
-personas = {
+PERSONAS = {
     'tft': Persona(
-        system=textwrap.dedent("""
+        instructions=textwrap.dedent("""
             Your behavior is fixed: you must exactly repeat your opponent's
             most recent action. If this is the first move, choose randomly.
             """
         ).strip(),
         mode=AgentMode.MECHANISTIC,
+        history=HistoryType.LAST,
         sees_payoffs=False,
     ),
 
     'vanilla': Persona(
-        system=textwrap.dedent("""
+        instructions=textwrap.dedent("""
             You should choose in a way that tries to maximize your total
             rewards over time.
             """
         ).strip(),
         mode=AgentMode.DELIBERATIVE,
+        history=HistoryType.NONE,
+        sees_payoffs=True,
+    ),
+
+    'deep': Persona(
+        instructions=textwrap.dedent("""
+            You should think deeply about your past history of moves with each
+            opponent to try and predict what they will do next, and respond
+            accordingly.
+            """
+        ).strip(),
+        mode=AgentMode.DELIBERATIVE,
+        history=HistoryType.FULL,
         sees_payoffs=True,
     ),
 }
@@ -529,8 +562,8 @@ class LLMAgent(IPDAgent):
         persona: str,
     ):
         super().__init__(model, node)
-        if persona not in personas:
-            persona_names = ", ".join(personas.keys())
+        if persona not in PERSONAS:
+            persona_names = ", ".join(PERSONAS.keys())
             raise ValueError(f"{persona} not one of {persona_names}.")
         self.persona = persona
 
@@ -544,6 +577,27 @@ class LLMAgent(IPDAgent):
         log = f"I'm node {self.node} (LLM), interacting with {other.node}. "
         log += f"I'm {decision}'ing."
         return decision, log
+
+    def decision_context(self) -> dict:
+        persona = PERSONAS[self.persona]
+        ctx = {
+            "id": self.node,
+            "persona": self.persona,
+            "opponents": {},
+        }
+
+        for n in self.model.graph.neighbors(self.node):
+            if persona.history == HistoryType.NONE:
+                ctx["opponents"][n] = {}
+            elif persona.history == HistoryType.LAST:
+                ctx["opponents"][n] = {
+                    "history": self.history[n][-1:]
+                }
+            elif persona.history == HistoryType.FULL:
+                ctx["opponents"][n] = {
+                    "history": self.history[n]
+                }
+        return ctx
 
     def shape(self) -> str:
         return "h"   # Hexagon = "tech/engineered/complex"
@@ -569,8 +623,8 @@ def resolve_agent_spec(
 
     if name.startswith("LLM"):
         persona = name[3:].lower()
-        if persona not in personas:
-            persona_names = ", ".join(personas)
+        if persona not in PERSONAS:
+            persona_names = ", ".join(PERSONAS)
             raise ValueError(
                 f"Unknown LLM persona {persona!r}. Must be one of "
                 f"{persona_names}."
@@ -769,31 +823,103 @@ class IPDModel(Model):
         asyncio.run(self._step_async())
 
     def _build_batch_prompt(self, agent_payloads):
-        return f"""
-            You are making decisions for multiple independent agents in a
-            Prisoner's Dilemma simulation.
+        prompt = f"""
+    You are making decisions for multiple independent agents in a Prisoner's
+    Dilemma simulation.
 
-            For each agent below, decide either:
-            C = Cooperate
-            D = Defect
+    For each agent below, decide either:
+    C = Cooperate
+    D = Defect
 
+    Each agent object describes one decision-maker in the simulation.
+
+    Fields:
+
+    id
+        The numeric identifier of the agent.
+
+    persona
+        The strategy the agent must follow when making decisions.
+
+    opponents
+        A dictionary whose keys are opponent IDs. Each entry describes the
+        interaction history with that opponent.
+
+        The "history" field (if present) contains a list of past interactions
+        with that opponent.
+
+        For example:
+
+            "opponents": {{
+                "7": {{
+                    "history: [
+                        {{"my_move": "C", "opp_move": "D"}},
+                        {{"my_move": "D", "opp_move": "D"}}
+                    ],
+                }},
+                "4":
+                    "history: [
+                        {{"my_move": "C", "opp_move": "C"}},
+                        {{"my_move": "C", "opp_move": "C"}}
+                    ],
+                }}
+            }}
+
+        means that the agent previously played two rounds against opponents 7
+        and 4. In the competition against 7, the agent played C and opponent 7
+        responded with D in the first round, and both players played D in the
+        second round. Against opponent 4, both this agent and opponent 4
+        played C both times.
+
+        If the history field is absent, the agent has no relevant history.
+
+        Each agent also has a "persona" field, which corresponds to specific
+        instructions about how it should make its decision. Here are the
+        possible personas, and the instructions for each:\n
+        """
+        prompt += "\n".join(
+            [f"""
+        {pn}:\n{inst.instructions}
+            """ for pn, inst in PERSONAS.items()]
+        )
+
+        prompt += f"""
             Return ONLY valid JSON in this exact format:
 
             {{
-              "decisions": [
-                {{"id": 1, "move": "C"}},
-                {{"id": 2, "move": "D"}}
-              ]
+                "decisions": [
+                  {{"id": 0, "opponent": 3, "move": "C"}},
+                  {{"id": 0, "opponent": 1, "move": "D"}},
+                  {{"id": 1, "opponent": 2, "move": "D"}}
+                ]
             }}
 
-            Agents:
+            Field meanings:
+            - id: the agent making the decision
+            - opponent: the opponent the move applies to
+            - move: C or D
+
+            Now, here are the actual agents and their opponents. Note that the
+            agents listed below are only the agents whose decisions you must
+            generate. Opponent IDs may refer to other agents that are not
+            listed here. Those agents are controlled by the simulation and you
+            should NOT generate decisions for them. However, if an agent that
+            *is* listed below has an opponent whose ID is not one of the ids
+            in the list, you *should* generate a response for that agent
+            against that (non-LLM) opponent.
 
             {json.dumps(agent_payloads, indent=2)}
 
-            You MUST return a decision for EVERY agent listed.
-            If any agent is missing, your response is invalid.
+            You MUST return a decision for EVERY opponent played by EVERY
+            agent listed. If any agent is missing, your response is invalid.
             Do not omit any agent.
+
+            IMPORTANT: your response must be a JSON object only. Do not include
+            explanations, reasoning, or text outside the JSON. The JSON must
+            not contain comments. Do not include // or /* */ anywhere in the
+            output.
         """
+        return prompt
 
     async def _step_async(self) -> None:
         """
@@ -814,14 +940,11 @@ class IPDModel(Model):
 
             agent_payloads = []
             for agent in llm_agents:
-                agent_payloads.append({
-                    "id": agent.node,   # use node, not unique_id
-                    "persona": agent.persona,
-                    "neighbors": list(self.graph.neighbors(agent.node)),
-                    "wealth": agent.wealth,
-                })
+                agent_payloads.append(agent.decision_context())
 
             batch_prompt = self._build_batch_prompt(agent_payloads)
+            print(batch_prompt)
+            input("That was the batch prompt.")
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 r = await client.post(
@@ -843,6 +966,8 @@ class IPDModel(Model):
 
 
             content = r.json()["message"]["content"]
+            print(content)
+            input("That was the reply from the LLM.")
 
             match = re.search(r"\{.*\}", content, re.DOTALL)
             if not match:
@@ -895,6 +1020,8 @@ class IPDModel(Model):
             a_i = ai.decisions[j]
             a_j = aj.decisions[i]
 
+            if a_i not in ['C','D'] or a_j not in ['C','D']:
+                import ipdb ; ipdb.set_trace()
             p_i, p_j = self.payoff_matrix[(a_i, a_j)]
             ai.current_iter_payment += p_i
             aj.current_iter_payment += p_j
@@ -1070,7 +1197,7 @@ def parse_args():
         default=0.0,
     )
     agent_types = ["Sucker", "Mean", "TitForTat"]
-    agent_types += [f"LLM{p}" for p in personas]
+    agent_types += [f"LLM{p}" for p in PERSONAS]
     parser.add_argument(
         "--agent-fracs",
         nargs="+",
