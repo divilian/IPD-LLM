@@ -3,6 +3,11 @@
 ## Bug fixes
 
 - [ ] Why do LLMtft's do worse than TFT's? Shouldn't they be the same?
+- [ ] Add payoffs to global prompt text
+- [ ] Break into multiple files
+- [ ] Investigate `llama_cpp` python package!! (instead of Ollama)
+- [ ] Add "outlines" (`from outlines.models.ollama import Ollama`) or Pydantic
+  (`from pydantic import BaseModel`) to enforce JSON adherance
 
 ## Diagnostics
 
@@ -31,3 +36,6 @@
       Means, tip it so that TFTs win?
     - [ ] In a Barabasi-Albert, what's the effect of putting TFTs on high-freq
       nodes vs. Means?
+
+## Re-code in Concordia and Casevo
+
