@@ -1,0 +1,36 @@
+
+Okay, I now have a working IPD simulation using Mesa, which calls LLMs through
+an Ollama API. My next task is the following: I want to re-implement two
+versions of this program, one using the Concordia GABM framework, and one using
+the Casevo multi-agent simulation framework.
+
+My main goal in this project is actually to familiarize myself with how
+Concordia and Casevo work, so that I can decide which of them (if either) to
+use for my political science modeling research, and which of them (if either)
+to teach to my DATA 420 Modeling and Simulation class.
+
+Before we begin, I have a couple questions.
+
+1) Are there other alternatives than Concordia and Casevo in this space? Those
+are two of the three I've heard of (the other, Shachi, I didn't like their
+paper and so am going to ignore). But perhaps there are other important
+solutions here that I'm missing and should know about.
+
+2) If I'm not mistaken, Casevo is built on Python Mesa, or at least integrates
+with it somewhat, so I'm thinking the port to Casevo won't be as onerous. Am I
+right about that? Or does Casevo use Mesa in a different enough way than
+I'm currently using it that there isn't much to re-use. Also: is Concordia
+compatible with Mesa, or would I be ditching Mesa for the Concordia version?
+
+3) Which of the two would you recommend I start with?
+
+4) What's the best approach: copy my current code, and then surgically make
+changes to replace the Ollama stuff with the Concordia-or-Casevo stuff? Or
+start over from scratch? Or somewhere in between?
+
+I've given you the complete contents of my current IPD sim in several other
+chats, but if you'd like me to past the current version of it here I can do
+that.
+
+Finally, take your time in answering this question. A correct response is
+better than a quick response.
