@@ -1,0 +1,256 @@
+#!/usr/bin/env python
+"""
+cli.py
+
+Iterated Prisoner's Dilemma on a Stochastic Block Model graph with:
+- One agent per graph node
+- Sucker, Mean, TitForTat, and LLM agents with various personas
+- Configurable homophily based on agent type
+
+Install:
+  pip install mesa networkx
+Run syntax:
+  python pris.py -h
+"""
+import argparse
+import logging
+from tqdm import tqdm
+from typing import List, Tuple
+
+import polars as pl
+
+from model import IPDModel
+from agents.personas import PERSONAS
+from llm.ollama_backend import ensure_ollama_running
+from llm.backend import create_backend
+from agents.factory import AgentFactory
+from analysis.stats import per_agent_type_stats, print_stats
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Iterated Prisoner's Dilemma on a graph.",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "N",
+        type=int,
+        help="Number of agents",
+    )
+    parser.add_argument(
+        "--T",
+        type=float,
+        help="Temptation to defect (default 5)",
+        default=5.0,
+    )
+    parser.add_argument(
+        "--R",
+        type=float,
+        help="Reward for cooperating (default 3)",
+        default=3.0,
+    )
+    parser.add_argument(
+        "--P",
+        type=float,
+        help="Punishment for mutual defection (default 1)",
+        default=1.0,
+    )
+    parser.add_argument(
+        "--S",
+        type=float,
+        help="Sucker's payoff (default 0)",
+        default=0.0,
+    )
+    agent_types = ["Sucker", "Mean", "TitForTat"]
+    agent_types += [f"LLM{p}" for p in PERSONAS]
+    parser.add_argument(
+        "--agent-fracs",
+        nargs="+",
+        metavar=("AGENT", "FRAC"),
+        default=["Sucker", 0.5, "Mean", 0.5],
+        help=(
+            "Agent mix as pairs: AGENT FRAC AGENT FRAC ...\n"
+            "AGENT is one of:\n"
+            + "".join(f"  - {agent_type}\n" for agent_type in agent_types)
+            + "Ex: --agent-fracs Sucker 0.4 Mean 0.4 LLMgrudge 0.2\n"
+            + "(default Sucker 0.5, Mean 0.5)"
+        ),
+    )
+    parser.add_argument(
+        "--avg-degree",
+        type=float,
+        default=3.0,
+        help="Target average degree of nodes in graph."
+    )
+    parser.add_argument(
+        "--homophily-weight",
+        type=float,
+        default=0.5,
+        help="Fraction of each agent's expected edge budget allocated to\n"
+             "same-type agents. (default 0.5)",
+    )
+    parser.add_argument(
+        "--num-iter",
+        type=int,
+        default=25,
+        help="Number of simulation iterations."
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=12345,
+        help="Seed for rng's; starting (walking) seed for graph rng."
+    )
+    parser.add_argument(
+        "--tft-noise",
+        type=float,
+        default=0.10,
+        help="TitForTatAgent noise rate in [0,1]. (default 0.10)",
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["ollama", "mock", "llamacpp"],
+        default="ollama",
+        help="LLM backend to use."
+    )
+    parser.add_argument(
+        "--ollama-model",
+        type=str,
+        default="llama3.1:latest",
+        help="Ollama model to use for LLM agents."
+    )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Plot animation."
+    )
+    parser.add_argument(
+        "--analyze",
+        action="store_true",
+        help="Launch interactive node analyzer."
+    )
+    parser.add_argument(
+        "--log-level",
+        default="WARNING",
+        choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Set logging level.",
+    )
+
+    args = parser.parse_args()
+
+    if not args.T > args.R > args.P > args.S:
+        raise ValueError("PD constraint #1 violated (T>R>P>S).")
+    if not 2*args.R > args.S + args.T:
+        raise ValueError("PD constraint #2 violated (2R>T+S).")
+    if not (0.0 <= args.tft_noise <= 1.0):
+        raise ValueError("--tft-noise must be between 0 and 1")
+
+    return args
+
+
+def interact_with_model(m: IPDModel):
+
+    def node_prompt(m):
+        return (
+            f"Enter node ({','.join([str(n) for n in sorted(m.graph.nodes)])},"
+            "'done'): "
+        )
+
+    def neigh_prompt(m, n):
+        neigh_list = ','.join([str(k) for k in m.graph.neighbors(n)])
+        return (
+            f"  Enter neighbor of {n} ({neigh_list},'done'): "
+        )
+
+    node_num_str = input(node_prompt(m))
+    while node_num_str != "done":
+        n = int(node_num_str)
+        print(m.node_to_agent[n])
+        neighs = m.graph.neighbors(n)
+        if neighs:
+            print("Neighbors:")
+            for neigh in neighs:
+                print(f"  - {m.node_to_agent[neigh]}")
+            node_num_str = input(neigh_prompt(m, n))
+            while node_num_str != "done":
+                neigh = int(node_num_str)
+                if neigh in m.graph.neighbors(n):
+                    ncn = m.node_to_agent[neigh].__class__.__name__
+                    print(f"History with {ncn} {neigh}:")
+                    print(
+                        pl.DataFrame(m.node_to_agent[n].history[neigh]).rename(
+                            {
+                                'self_action': f'Node {n}',
+                                'other_action': f'Node {neigh}'
+                            }
+                        )
+                    )
+                else:
+                    print(f"  (Node {n} not adjacent to {neigh}.)")
+                node_num_str = input(neigh_prompt(m, n))
+
+        node_num_str = input(node_prompt(m))
+
+
+if __name__ == "__main__":
+
+    args = parse_args()
+
+    ensure_ollama_running(args.ollama_model)
+
+    logging.basicConfig(
+        level=args.log_level,
+        format="%(message)s"
+    )
+
+    stats = []
+
+    # ------------------------------------------------------------
+    # Payoff matrix.
+    # To be a valid prisoner's dilemma, T > R > P > S.
+    # Also, to avoid alternating exploitation, 2R > T + S.
+    # ------------------------------------------------------------
+    payoff_matrix = {
+        ("C", "C"): (args.R, args.R),
+        ("C", "D"): (args.S, args.T),
+        ("D", "C"): (args.T, args.S),
+        ("D", "D"): (args.P, args.P),
+    }
+
+    factory = AgentFactory.instance(args.agent_fracs, args)
+
+    # Only initialize an LLM backend if we're actually going to use it.
+    if any(name.startswith("LLM") for name in args.agent_fracs):
+        backend = create_backend(args)
+    else:
+        backend = None
+
+    m = IPDModel(
+        N=args.N,
+        avg_degree=args.avg_degree,
+        homophily_weight=args.homophily_weight,
+        payoff_matrix=payoff_matrix,
+        agent_factory=factory,
+        llm_backend=backend,
+        seed=args.seed,
+    )
+    print(f"Running {m}")
+
+    if args.plot:
+        m.setup_plotting()
+
+    for t in tqdm(range(args.num_iter)):
+        m.step()
+        monies = [m.node_to_agent[n].wealth for n in m.graph.nodes]
+        if args.plot:
+            m.plot()
+        row = {"step": t + 1}
+        row.update(per_agent_type_stats(m))
+        stats.append(row)
+
+    stats = pl.DataFrame(stats)
+    print_stats(stats)
+
+    if args.analyze:
+        interact_with_model(m)
