@@ -46,34 +46,40 @@ def serialize_payoffs(
     opponent_payoff) where actions are "C" (Cooperate) or "D" (Defect).
     """
     return textwrap.dedent(f"""
-        Payoff matrix:\n
-        Actions: C = Cooperate, D = Defect\n\n
-        If the agent chooses C and their opponent chooses C: 
-        the agent gets {payoff_matrix[('C','C')][0]}, 
-        their opponent gets {payoff_matrix[('C','C')][1]}.\n
-        If the agent chooses C and their opponent chooses D: 
-        the agent gets {payoff_matrix[('C','D')][0]}, 
-        their opponent gets {payoff_matrix[('C','D')][1]}.\n
-        If the agent chooses D and their opponent chooses C: 
-        the agent gets {payoff_matrix[('D','C')][0]}, 
-        their opponent gets {payoff_matrix[('D','C')][1]}.\n
-        If the agent chooses D and their opponent chooses D: 
-        the agent gets {payoff_matrix[('D','D')][0]}, 
-        their opponent gets {payoff_matrix[('D','D')][1]}.\n\n
+        Payoff matrix:
+
+        Actions: C = Cooperate, D = Defect
+
+        If the agent chooses C and their opponent chooses C, the agent gets
+        {payoff_matrix[('C','C')][0]} and their opponent gets
+        {payoff_matrix[('C','C')][1]}.
+        If the agent chooses C and their opponent chooses D, the agent gets
+        {payoff_matrix[('C','D')][0]} and their opponent gets
+        {payoff_matrix[('C','D')][1]}.
+        If the agent chooses D and their opponent chooses C, the agent gets
+        {payoff_matrix[('D','C')][0]} and their opponent gets
+        {payoff_matrix[('D','C')][1]}.
+        If the agent chooses D and their opponent chooses D, the agent gets
+        {payoff_matrix[('D','D')][0]} and their opponent gets
+        {payoff_matrix[('D','D')][1]}.
+
         """
     )
 
 
 def build_batch_prompt(agent_payloads, payoff_matrix):
     prompt = textwrap.dedent(f"""
-    You are making decisions for multiple independent agents in a Prisoner's
-    Dilemma simulation.
+    Return JSON only.
 
-    For each agent below, decide either:
+    You are generating decisions for multiple independent agents in an
+    iterated Prisoner's Dilemma simulation.
+
+    For each listed agent and for each opponent in that agent's "opponents"
+    dictionary, return exactly one move:
     C = Cooperate
     D = Defect
 
-    Each agent object describes one decision-maker in the simulation.
+    Each agent object below describes one decision-maker.
 
     """)
     prompt += serialize_payoffs(payoff_matrix)
@@ -91,42 +97,40 @@ def build_batch_prompt(agent_payloads, payoff_matrix):
         A dictionary whose keys are opponent IDs. Each entry describes the
         interaction history with that opponent.
 
-        The "history" field (if present) contains a list of past interactions
-        with that opponent.
+        The "history" field contains a list of past interactions with that
+        opponent. If the history list is empty, there have been no previous
+        interactions with that opponent.
 
-        For example:
+        Example:
 
             "opponents": {{
                 "7": {{
                     "history": [
                         {{"my_move": "C", "opp_move": "D"}},
                         {{"my_move": "D", "opp_move": "D"}}
-                    ],
+                    ]
                 }},
-                "4":
+                "4": {{
                     "history": [
                         {{"my_move": "C", "opp_move": "C"}},
                         {{"my_move": "C", "opp_move": "C"}}
-                    ],
+                    ]
                 }}
             }}
 
-        means that the agent previously played two rounds against opponents 7
-        and 4. In the competition against 7, the agent played C and opponent 7
-        responded with D in the first round, and both players played D in the
-        second round. Against opponent 4, both this agent and opponent 4
-        played C both times.
+        This means the agent previously played two rounds against opponents 7
+        and 4. Against opponent 7, the agent played C and then D, while
+        opponent 7 played D and then D. Against opponent 4, both players
+        played C in both rounds.
 
-        If the history field is absent, the agent has no relevant history.
-
-        Each agent also has a "persona" field, which corresponds to specific
-        instructions about how it should make its decision. Here are the
-        possible personas, and the instructions for each:\n
+        Each agent also has a "persona" field. The possible personas and
+        their instructions are:
     """
     )
     prompt += textwrap.dedent("\n".join(
         [f"""
-    {pn}:\n{inst.instructions}
+    {pn}:
+{inst.instructions}
         """ for pn, inst in PERSONAS.items()]
     ))
 
@@ -146,25 +150,19 @@ def build_batch_prompt(agent_payloads, payoff_matrix):
         - opponent: the opponent the move applies to
         - move: C or D
 
-        Now, here are the actual agents and their opponents. Note that the
-        agents listed below are only the agents whose decisions you must
-        generate. Opponent IDs may refer to other agents that are not
-        listed here. Those agents are controlled by the simulation and you
-        should NOT generate decisions for them. However, if an agent that
-        *is* listed below has an opponent whose ID is not one of the ids
-        in the list, you *should* generate a response for that agent
-        against that (non-LLM) opponent.
+        You must return one decision for every opponent listed for every
+        agent shown below.
+
+        The agents listed below are the only agents whose decisions you must
+        generate. Opponent IDs may refer to agents not listed below. If a
+        listed agent has an opponent whose ID is not listed as one of the
+        agents below, you must still return a decision for that interaction.
 
         {json.dumps(agent_payloads, indent=2)}
 
-        You MUST return a decision for EVERY opponent played by EVERY
-        agent listed. If any agent is missing, your response is invalid.
-        Do not omit any agent.
-
-        IMPORTANT: your response must be a JSON object only. Do not include
-        explanations, reasoning, or text outside the JSON. The JSON must
-        not contain comments. Do not include // or /* */ anywhere in the
-        output.
+        Your response must be a JSON object only. Do not include
+        explanations, reasoning, or any text outside the JSON. Do not include
+        comments. Do not include // or /* */ anywhere in the output.
     """)
     return prompt
 
@@ -192,5 +190,3 @@ def get_prompt(payoff_matrix, history: List[Dict]) -> str:
         Do you choose to Cooperate, or Defect?
     """).strip()
     return prompt
-
-
