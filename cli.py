@@ -221,7 +221,7 @@ if __name__ == "__main__":
     factory = AgentFactory.instance(args.agent_fracs, args)
 
     # Only initialize an LLM backend if we're actually going to use it.
-    if any(name.startswith("LLM") for name in args.agent_fracs):
+    if any(str(name).startswith("LLM") for name in args.agent_fracs):
         backend = create_backend(args)
     else:
         backend = None
