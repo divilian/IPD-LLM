@@ -34,3 +34,53 @@ that.
 
 Finally, take your time in answering this question. A correct response is
 better than a quick response.
+
+############################
+
+(IPD version)
+
+I want to write a research paper for the upcoming SSC 2026 conference (details here if you're interested: https://www.durham.ac.uk/research/institutes-and-centres/research-methods/social-simulation-conference-2026/) and of course one requirement is that my topic is novel, and has not appeared previously in the literature.
+
+I'd like your help refining what that topic should be.
+
+Let me begin with these definitions. I'm going to define "Model A" as follows:
+
+"Traditional rules-based agents interacting with each other in a virtual (randomly-generated, static over time) social network; pairs of agents who are adjacent engage with each other in an Iterated Prisoner's Dilemma (IPD) game every tick of the simulated clock."
+
+I'm going to define "Model B" as follows:
+
+"The same as Model A, except that the social network can evolve over time; in addition to making cooperate/defect decisions, agents also have the option of dissolving a connection with an adjacent node (removing that edge from the network) and the option of forming a connection with a non-adjacent node."
+
+I'm going to define "Model C" as follows:
+
+"The same as Model B, except that instead of traditional rules-based agents, some of the agents are LLMs who make cooperate/defect and dissolution/formation decisions based on their own deep reasoning."
+
+My Question: has Model A already been explored in the research literature? (My gut feel says "surely it has.") Has Model B? (I'm less sure.) Has Model C? (I think this is likely to be novel." If the answer to any of these questions is "yes," what are the exact literature citations of papers that explored and analyzed these models? IMPORTANT: all literature citations of papers that you give in your response must be actual, real papers which actually have been published by real authors, not stuff you make up.
+
+Finally, take your time in responding to this. A correct and complete response is much better than a quick response.
+
+########################
+
+(BVM version)
+
+I want to write a research paper for the upcoming SSC 2026 conference (details here if you're interested: https://www.durham.ac.uk/research/institutes-and-centres/research-methods/social-simulation-conference-2026/) and of course one requirement is that my topic is novel, and has not appeared previously in the literature.
+
+I'd like your help refining what that topic should be.
+
+Let me begin with these definitions. First, the "BVM," or "Binary Voter Model," is a simple model of opinion dynamics in which agents, each of which have one of two "colors" (say, red and blue) representing their opinion on something (say, which political party they support) influence one another. In the simplest version, whenever agent 1 encounters agent 2, agent 1 propagates its color to agent 2. There have been zillions of additions to this, including: more than two possible opinions instead of binary; continuous (real-valued) opinions instead of discrete; agents all being connected to one another (the complete graph) versus being connected on randomly-generated graphs; using a majority-rule of one's graph neighbors' opinions instead of simply each of one's neighbors considered individually; the addition of "stubborn" agents who do not change their opinions; and the like. I could go on and on.
+
+So for purposes of this research report, by "BVM" I really mean a family of models with "some subset of the above features."
+
+What I'm interested in is this: in what ways have LLM-enhanced agents been used for such BVM-family models? By "LLM-enhanced agent" I mean that an agent that does not operate according to fixed rules (such as "copying one's neighbor's opinion," "taking the majority of one's neighbors' opinions," "moving one's continuous-valued opinion to be the midpoint between its current value and that of one's neighbor's continuous-valued opinion," etc.). By contrast, LLM-enhanced agents are those for which an LLM is prompted, and a response interpreted, in order to change the agent's opinions. Using an LLM for such a task is thought to provide higher fidelity to actual human reasoning processes.
+
+My goal is to identify a novel research area that I can write a paper about. I'd like to explore some aspect that is new; in other words, some particular variety of the BVM family which has not yet been explored with LLMs.
+
+What I really want is the lowest-hanging fruit; in other words, what is the simplest addition to the basic BVM family that has not yet been explored with LLM-enhanced agents? In addition, I want you to provide paper citations for all the existing research that would be "adjacent" to the novel research topic you identify. I must be able to include in my Related Work section all the previous endeavors that I'm building off of, and for which I will identify how my research topic differs.
+
+Two super important notes:
+
+1) all literature citations of papers that you give in your response must be actual, real papers which actually have been published by real authors, not stuff you make up.
+
+2) Take your time in responding to this. A correct and complete response is much better than a quick response.
+
+vim:textwidth=99999
