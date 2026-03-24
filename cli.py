@@ -18,6 +18,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 import polars as pl
+import matplotlib.pyplot as plt
 
 from model import IPDModel
 from agents.personas import PERSONAS
@@ -25,6 +26,7 @@ from llm.ollama_backend import ensure_ollama_running
 from llm.backend import create_backend
 from agents.factory import AgentFactory
 from analysis.stats import per_agent_type_stats, print_stats
+from analysis.plotting import setup_plotting, plot
 
 
 def parse_args():
@@ -231,6 +233,7 @@ if __name__ == "__main__":
         avg_degree=args.avg_degree,
         homophily_weight=args.homophily_weight,
         payoff_matrix=payoff_matrix,
+        num_iter=args.num_iter,
         agent_factory=factory,
         llm_backend=backend,
         seed=args.seed,
@@ -238,13 +241,13 @@ if __name__ == "__main__":
     print(f"Running {m}")
 
     if args.plot:
-        m.setup_plotting()
+        plot_context = setup_plotting(m)
 
     for t in tqdm(range(args.num_iter)):
         m.step()
         monies = [m.node_to_agent[n].wealth for n in m.graph.nodes]
         if args.plot:
-            m.plot()
+            plot(m, plot_context, monies, t, args.num_iter)
         row = {"step": t + 1}
         row.update(per_agent_type_stats(m))
         stats.append(row)
@@ -254,3 +257,6 @@ if __name__ == "__main__":
 
     if args.analyze:
         interact_with_model(m)
+
+    if args.plot:
+        plt.show()

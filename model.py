@@ -28,6 +28,7 @@ class IPDModel(Model):
         avg_degree: float,
         homophily_weight: float,
         payoff_matrix: List[Tuple],
+        num_iter: int,
         agent_factory: AgentFactory,
         llm_backend: LLMBackend,
         seed: int,
@@ -37,6 +38,7 @@ class IPDModel(Model):
         self.N = N
         self.seed = seed
         self.payoff_matrix = payoff_matrix
+        self.num_iter = num_iter
         self.llm_backend = llm_backend
 
         # Distinct specs = SBM blocks (stable order)
@@ -212,7 +214,7 @@ class IPDModel(Model):
 
     def _resolve_payoffs(self) -> None:
         """
-        Resolve and commit all the information in the agents' current_decision
+        Resolve and commit all the information in the agents' current_decisions
         dicts. For each one, determine the output of that round of the game
         against the agent's opponent, award winnings, and record history.
         """
@@ -240,6 +242,31 @@ class IPDModel(Model):
                 b.record_interaction(i, move_j, move_i)
 
                 processed.add((i, j))
+
+        # Award the winnings, but scale by the node's degree. This is to avoid
+        # disadvantaging agents with fewer neighbors who of course therefore
+        # play fewer rounds and hence have lower winnings.
+        for a in self.agents:
+            k = self.graph.degree[a.node]
+            if k > 0:
+                a.wealth += a.current_iter_payment / k
+
+    def estimate_expected_avg_wealth(self):
+        """
+        Completely back-of-the-envelope estimate of "about how much should each
+        agent expect to win during this situation?" The crude formula assumes
+        an independent 50/50 chance of choosing to defect or cooperate. Note
+        that we compute "per_iter" here (not "per_encounter") because we're
+        discounting each agent's per-iteration winnings by its degree (which
+        is its number of encounters).
+        """
+        avg_agent_per_iter = 0.25 * (
+            self.payoff_matrix[("C", "C")][0]
+            + self.payoff_matrix[("D", "C")][0]
+            + self.payoff_matrix[("C", "D")][0]
+            + self.payoff_matrix[("D", "D")][0]
+        )
+        return avg_agent_per_iter * self.num_iter
 
     def agent_mix(self) -> dict[str, int]:
         """
