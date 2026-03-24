@@ -95,7 +95,7 @@ def parse_args():
         "--num-iter",
         type=int,
         default=25,
-        help="Number of simulation iterations."
+        help="Number of simulation iterations. (default 25)"
     )
     parser.add_argument(
         "--seed",

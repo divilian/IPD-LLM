@@ -24,7 +24,6 @@ def resolve_agent_spec(
       "LLMgrudge"   -> (LLMAgent, {"persona": "grudge"})
       "LLMvanilla"  -> (LLMAgent, {"persona": "vanilla"})
     """
-    print(f"Stephen here: {name}")
     if name == "TitForTat":
         return TitForTatAgent, {"noise": args.tft_noise}
 
