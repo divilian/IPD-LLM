@@ -5,6 +5,7 @@ import asyncio
 
 from mesa import Model, DataCollector
 import networkx as nx
+import numpy as np
 
 from agents.factory import AgentFactory
 from agents.llm_agent import LLMAgent
@@ -18,16 +19,15 @@ from llm.mock_backend import MockBackend
 class IPDModel(Model):
     """
     Iterated Prisoner's Dilemma on a static graph, Mesa 3.x style.
-
-    Graph is generated via an SBM using avg_degree + homophily_weight.
     """
 
     def __init__(
         self,
         N,  # num agents
         avg_degree: float,
-        homophily_weight: float,
         payoff_matrix: List[Tuple],
+        p_same: float,
+        p_diff: float,
         num_iter: int,
         agent_factory: AgentFactory,
         llm_backend: LLMBackend,
@@ -48,33 +48,12 @@ class IPDModel(Model):
         )
         sizes = [int(round(agent_factory.probs[c] * N)) for c in specs]
 
-        # Compute SBM probabilities from avg_degree + homophily_weight.
-        p_same, p_diff = compute_sbm_probs(
-            sizes=sizes,
-            avg_degree=avg_degree,
-            homophily_weight=homophily_weight,
-        )
-
-        k = len(specs)
-        p = [[p_diff] * k for _ in range(k)]
-        for i in range(k):
-            p[i][i] = p_same
-
         # Build SBM graph (nodes grouped by block).
-
-        # The graph seed might have to dynamically change, since the provided
-        # seed might not produce a connected graph. So, for cleanliness, keep
-        # track of this possibly-different seed in a new inst var.
-        self.graph_seed = seed
-        logging.info(f"Trying graph seed {self.graph_seed}...")
-        self.graph = nx.stochastic_block_model(sizes, p, seed=self.graph_seed)
-        while not nx.is_connected(self.graph):
-            self.graph_seed = self.graph_seed + 1
-            logging.info(f"Trying graph seed {self.graph_seed}...")
-            logging.info(f"p = {p}")
-            self.graph = nx.stochastic_block_model(
-                sizes, p, seed=self.graph_seed
-            )
+        num_agent_types = len(specs)
+        p = p_diff * np.ones((num_agent_types, num_agent_types))
+        for i in range(num_agent_types):
+            p[i][i] = p_same
+        self.graph = nx.stochastic_block_model(sizes, p, seed=self.seed)
 
         nodes = list(self.graph.nodes)
         idx = 0

@@ -85,11 +85,22 @@ def parse_args():
         help="Target average degree of nodes in graph."
     )
     parser.add_argument(
-        "--homophily-weight",
+        "--p-same",
         type=float,
         default=0.5,
-        help="Fraction of each agent's expected edge budget allocated to\n"
-             "same-type agents. (default 0.5)",
+        help=(
+            "Probability of direct connection between two agents of the "
+            "same type (default 0.5)."
+        ),
+    )
+    parser.add_argument(
+        "--p-diff",
+        type=float,
+        default=0.1,
+        help=(
+            "Probability of direct connection between two agents of different "
+            "types (default 0.1)."
+        ),
     )
     parser.add_argument(
         "--num-iter",
@@ -231,8 +242,9 @@ if __name__ == "__main__":
     m = IPDModel(
         N=args.N,
         avg_degree=args.avg_degree,
-        homophily_weight=args.homophily_weight,
         payoff_matrix=payoff_matrix,
+        p_same=args.p_same,
+        p_diff=args.p_diff,
         num_iter=args.num_iter,
         agent_factory=factory,
         llm_backend=backend,
