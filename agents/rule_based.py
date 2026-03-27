@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Tuple
 
 from mesa import Model, Agent
 
@@ -14,7 +14,7 @@ class SuckerAgent(IPDAgent):
     def decide_against(
         self,
         other: "IPDAgent",
-        payoff_matrix: List[Tuple],
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
     ) -> tuple[str, str]:
         log = f"I'm node {self.node} (Sucker), interacting with {other.node}. "
         log += "(C'ing as always.)"
@@ -34,7 +34,7 @@ class MeanAgent(IPDAgent):
     def decide_against(
         self,
         other: "IPDAgent",
-        payoff_matrix: List[Tuple],
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
     ) -> tuple[str, str]:
         log = f"I'm node {self.node} (Mean), interacting with {other.node}. "
         log += "(D'ing as always.)"
@@ -55,7 +55,7 @@ class TitForTatAgent(IPDAgent):
     def decide_against(
         self,
         other: "IPDAgent",
-        payoff_matrix: List[Tuple],
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
     ) -> tuple[str, str]:
         log = f"I'm node {self.node} (TFT), interacting with {other.node}. "
         h = self.history[other.node]

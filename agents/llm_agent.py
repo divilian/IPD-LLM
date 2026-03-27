@@ -23,7 +23,7 @@ class LLMAgent(IPDAgent):
     def decide_against(
         self,
         other: "IPDAgent",
-        payoff_matrix: List[Tuple],
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
     ) -> tuple[str, str]:
 
         decision = self.decisions[other.node]

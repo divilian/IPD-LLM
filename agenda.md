@@ -7,9 +7,10 @@
 
 ## Bug fixes
 
+- [ ] There's some LLM-related stuff in the IPDAgent base class (`base.py`)
 - [ ] Why do LLMtft's do worse than TFT's? Shouldn't they be the same?
 - [ ] Add payoffs to global prompt text
-- [ ] Break into multiple files
+- [x] Break into multiple files
 - [ ] Investigate `llama_cpp` python package!! (instead of Ollama)
 - [ ] Add "outlines" (`from outlines.models.ollama import Ollama`) or Pydantic
   (`from pydantic import BaseModel`) to enforce JSON adherence

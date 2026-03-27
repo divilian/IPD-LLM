@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import TypeVar, List, Tuple
+from typing import TypeVar
 from collections import defaultdict
 
 from mesa import Agent, Model
@@ -52,7 +52,7 @@ class IPDAgent(Agent):
     def decide_against(
         self,
         other: "IPDAgent",
-        payoff_matrix: List[Tuple],
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
     ) -> tuple[str, str]:
         """
         Make a decision against another agent. Return your decision ("C" or
