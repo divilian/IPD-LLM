@@ -19,7 +19,7 @@ def setup_plotting(model) -> dict:
     """
     pos = nx.spring_layout(model.graph, seed=model.seed, k=1.2)
     cmap = mpl.colormaps["coolwarm"]  # blue->white->red
-    fig, ax = plt.subplots(constrained_layout=True)
+    fig, ax = plt.subplots(constrained_layout=True, figsize=(9,8))
     ax.set_axis_off()
     norm = Normalize(
         vmin=0,
