@@ -17,7 +17,7 @@ import logging
 from tqdm import tqdm
 from typing import List, Tuple
 
-import polars as pl
+import pandas as pd
 import matplotlib.pyplot as plt
 
 from model import IPDModel
@@ -252,7 +252,7 @@ if __name__ == "__main__":
         row.update(per_agent_type_stats(m))
         stats.append(row)
 
-    stats = pl.DataFrame(stats)
+    stats = pd.DataFrame(stats)
     print_stats(stats)
 
     if args.analyze:
