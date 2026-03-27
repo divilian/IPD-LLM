@@ -1,6 +1,6 @@
 import re
 
-import polars as pl
+import pandas as pd
 
 from model import IPDModel
 
@@ -40,7 +40,11 @@ def per_agent_type_stats(
             else 0.0
         )
     return row
-def print_stats(stats: pl.DataFrame, last_n=20):
+
+def print_stats(stats: pd.DataFrame, last_n=20, plot_means=False):
+
+    pd.options.display.float_format = "{:.2f}".format
+
     cols = stats.columns
 
     things = sorted({
@@ -56,12 +60,10 @@ def print_stats(stats: pl.DataFrame, last_n=20):
 
     other = [c for c in cols if c not in ordered]
 
-    stats = stats.select(other + ordered)
+    stats = stats[other + ordered]
 
-    with pl.Config(
-        tbl_hide_dataframe_shape=True,
-        tbl_hide_column_data_types=True,
-        float_precision=2,
-        tbl_cell_numeric_alignment="RIGHT",
-    ):
-        print(stats.tail(last_n))
+    print(stats.tail(last_n))
+
+    if plot_means:
+        to_plot = stats[[f"{t}$"    for t in things if f"{t}$"    in cols]]
+        to_plot.plot(kind="line")
