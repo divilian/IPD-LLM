@@ -24,6 +24,27 @@ class SuckerAgent(IPDAgent):
         return "o"   # Circle = "soft/friendly/harmless" vibe
 
 
+@register_agent("Random")
+class RandomAgent(IPDAgent):
+    """Chooses randomly."""
+
+    def __init__(self, model: Model, node: int):
+        super().__init__(model, node)
+
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+    ) -> tuple[str, str]:
+        move = self.model.random.choice(['C','D'])
+        log = f"I'm node {self.node} (Random), interacting with {other.node}. "
+        log += f"Choosing to {move} this time."
+        return move, log
+
+    def shape(self) -> str:
+        return "d"   # Diamond
+
+
 @register_agent("Mean")
 class MeanAgent(IPDAgent):
     """Always defects."""
@@ -44,7 +65,7 @@ class MeanAgent(IPDAgent):
         return "v"   # Down triangle = "mean/aggressive"
 
 
-@register_agent("tft")
+@register_agent("TFT")
 class TitForTatAgent(IPDAgent):
     """Classic per-neighbor tit-for-tat (with optional noise)."""
 

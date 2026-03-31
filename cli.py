@@ -21,6 +21,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from model import IPDModel
+from agents.base import AGENT_REGISTRY
 from agents.personas import PERSONAS
 from llm.ollama_backend import ensure_ollama_running
 from llm.backend import create_backend
@@ -63,7 +64,7 @@ def parse_args():
         help="Sucker's payoff (default 0)",
         default=0.0,
     )
-    agent_types = ["Sucker", "Mean", "TitForTat"]
+    agent_types = [t for t in AGENT_REGISTRY]
     agent_types += [f"LLM{p}" for p in PERSONAS]
     parser.add_argument(
         "--agent-fracs",
