@@ -7,6 +7,7 @@ isoduration==20.11.0
 jsonpointer==3.0.0
 jupyterlab==4.4.10
 matplotlib==3.10.7
+mesa==3.4
 pip==25.3
 rfc3987-syntax==1.1.0
 scikit-learn==1.7.2

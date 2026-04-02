@@ -13,6 +13,6 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-python pris.py -h
-python pris.py 40 --agent-fracs Sucker 0.3 Mean 0.3 LLMvanilla 0.4
+python cli.py -h
+python cli.py 40 --agent-fracs Sucker 0.3 Mean 0.3 LLMvanilla 0.4
 ```
