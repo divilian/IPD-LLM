@@ -193,7 +193,7 @@ def interact_with_model(m: IPDModel):
                     ncn = m.node_to_agent[neigh].__class__.__name__
                     print(f"History with {ncn} {neigh}:")
                     print(
-                        pl.DataFrame(m.node_to_agent[n].history[neigh]).rename(
+                        pd.DataFrame(m.node_to_agent[n].history[neigh]).rename(
                             {
                                 'self_action': f'Node {n}',
                                 'other_action': f'Node {neigh}'
@@ -211,7 +211,8 @@ if __name__ == "__main__":
 
     args = parse_args()
 
-    ensure_ollama_running(args.ollama_model)
+    if any(['LLM' in a for a in args.agent_fracs]):
+        ensure_ollama_running(args.ollama_model)
 
     logging.basicConfig(
         level=args.log_level,
