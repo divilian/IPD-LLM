@@ -10,6 +10,7 @@ from agents.rule_based import TitForTatAgent
 from agents.llm_agent import LLMAgent
 from . import llm_agent   # (ensures registration happens)
 from . import rule_based  # (ensures registration happens)
+from . import simple_agent  # (ensures registration happens)
 
 def resolve_agent_spec(
     name: str,
