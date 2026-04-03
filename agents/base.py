@@ -65,6 +65,32 @@ class IPDAgent(Agent):
         """
         raise NotImplementedError
 
+    def rewire_as_desired(
+        self,
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]]):
+        """
+        Optionally do either or both of the following:
+        (1) Sever graph connections to agents you no longer want to play with.
+        (2) Create graph connections to other agents, which you can discover by
+        asking your neighbors for information via `.inform_foaf()`.
+        """
+        pass
+
+    def inform_foaf(
+        self,
+        other: "IPDAgent",
+    ) -> dict[int, list[dict[str, int | str]]] | None:
+        """
+        Return a reported interaction history keyed by opponent node number.
+        Each value is a list of dicts with keys 'step' (the round number),
+        'self_action', and 'other_action'.
+
+        Note that it is perfectly permissible to lie about this history, if you
+        deem that advantageous. You can also return None to give the inquirer
+        the hand.
+        """
+        return self.history
+
     def shape(self) -> str:
         """
         Return the shape your node should be in the graph. See:
