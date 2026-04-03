@@ -67,6 +67,12 @@ class IPDAgent(Agent):
         """
         raise NotImplementedError
 
+    def size(self) -> str:
+        """
+        Return the size your node should be in the graph.
+        """
+        return 300
+
     def step(self) -> None:
         """
         Decide your actions for all neighbors (per-neighbor decision making).

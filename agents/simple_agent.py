@@ -60,6 +60,9 @@ What is your response?
     def shape(self) -> str:
         return "h"   # Hex
 
+    def size(self) -> str:
+        return 2000
+
     def serialize_history(self, history, oid):
         if not history:
             return f"This is the first move in your game with this opponent ({oid-1})."

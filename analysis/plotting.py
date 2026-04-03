@@ -58,6 +58,7 @@ def plot(model, ctx, monies, t, num_iter):
     nodes = list(model.graph.nodes())
     colors = [ctx["cmap"](ctx["norm"](w)) for w in monies]
     shapes = [model.node_to_agent[i].shape() for i in nodes]
+    sizes = [model.node_to_agent[i].size() for i in nodes]
     for shape in set(shapes):
         idx = [i for i, s in enumerate(shapes) if s == shape]
         nx.draw_networkx_nodes(
@@ -65,8 +66,8 @@ def plot(model, ctx, monies, t, num_iter):
             pos=ctx["pos"],
             nodelist=[nodes[i] for i in idx],
             node_color=[colors[i] for i in idx],
+            node_size=[sizes[i] for i in idx],
             node_shape=shape,
-            node_size=350,
             ax=ctx["ax"],
         )
     ctx["fig"].suptitle(f"Iteration {t+1} of {num_iter}")
