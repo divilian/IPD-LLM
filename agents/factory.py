@@ -6,7 +6,7 @@ import random as py_random  # using only Mesa's rng; this is for a type hint
 
 from agents.base import AGENT_REGISTRY
 from agents.personas import PERSONAS
-from agents.rule_based import TitForTatAgent
+from agents.rule_based import TitForTatAgent, BrowserAgent
 from agents.llm_agent import LLMAgent
 from . import llm_agent   # (ensures registration happens)
 from . import rule_based  # (ensures registration happens)
@@ -27,6 +27,8 @@ def resolve_agent_spec(
     """
     if name == "tft":
         return TitForTatAgent, {"noise": args.tft_noise}
+    if name == "Browser":
+        return BrowserAgent, {"tft_noise": args.tft_noise, "patience":3}
 
     if name.startswith("LLM"):
         persona = name[3:].lower()

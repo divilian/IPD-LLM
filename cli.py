@@ -32,7 +32,7 @@ from analysis.plotting import setup_plotting, plot
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Iterated Prisoner's Dilemma on a graph.",
+        description="Iterated Prisoner's Dilemma on a graph",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -43,25 +43,25 @@ def parse_args():
     parser.add_argument(
         "--T",
         type=float,
-        help="Temptation to defect (default 5)",
+        help="Temptation to defect (def: 5)",
         default=5.0,
     )
     parser.add_argument(
         "--R",
         type=float,
-        help="Reward for cooperating (default 3)",
+        help="Reward for cooperating (def: 3)",
         default=3.0,
     )
     parser.add_argument(
         "--P",
         type=float,
-        help="Punishment for mutual defection (default 1)",
+        help="Punishment for mutual defection (def: 1)",
         default=1.0,
     )
     parser.add_argument(
         "--S",
         type=float,
-        help="Sucker's payoff (default 0)",
+        help="Sucker's payoff (def: 0)",
         default=0.0,
     )
     agent_types = [t for t in AGENT_REGISTRY]
@@ -76,22 +76,22 @@ def parse_args():
             "AGENT is one of:\n"
             + "".join(f"  - {agent_type}\n" for agent_type in agent_types)
             + "Ex: --agent-fracs Sucker 0.4 Mean 0.4 LLMgrudge 0.2\n"
-            + "(default Sucker 0.5, Mean 0.5)"
+            + "(def: Sucker 0.5, Mean 0.5)"
         ),
     )
     parser.add_argument(
-        "--avg-degree",
+        "--avg-deg",
         type=float,
         default=3.0,
-        help="Target average degree of nodes in graph."
+        help="Target average degree of nodes in graph"
     )
     parser.add_argument(
         "--p-same",
         type=float,
         default=0.5,
         help=(
-            "Probability of direct connection between two agents of the "
-            "same type (default 0.5)."
+            "Agency prob between agents of the "
+            "same type (def: 0.5)"
         ),
     )
     parser.add_argument(
@@ -99,56 +99,56 @@ def parse_args():
         type=float,
         default=0.1,
         help=(
-            "Probability of direct connection between two agents of different "
-            "types (default 0.1)."
+            "Agency prob between agents of diff "
+            "types (def: 0.1)"
         ),
     )
     parser.add_argument(
         "--num-iter",
         type=int,
         default=25,
-        help="Number of simulation iterations. (default 25)"
+        help="Number of simulation iterations (def: 25)"
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=12345,
-        help="Seed for rng's; starting (walking) seed for graph rng."
+        help="Seed for rng's; starting (walking) seed for graph rng"
     )
     parser.add_argument(
         "--tft-noise",
         type=float,
-        default=0.10,
-        help="TitForTatAgent noise rate in [0,1]. (default 0.10)",
+        default=0.1,
+        help="Tit-for-tat noise rate for some agent types (def: 0.1)",
     )
     parser.add_argument(
         "--backend",
         type=str,
         choices=["ollama", "mock", "llamacpp"],
         default="ollama",
-        help="LLM backend to use."
+        help="LLM backend to use"
     )
     parser.add_argument(
         "--ollama-model",
         type=str,
         default="llama3.1:latest",
-        help="Ollama model to use for LLM agents."
+        help="Ollama model to use for LLM agents"
     )
     parser.add_argument(
         "--plot",
         action="store_true",
-        help="Plot animation."
+        help="Plot animation"
     )
     parser.add_argument(
         "--analyze",
         action="store_true",
-        help="Launch interactive node analyzer."
+        help="Launch interactive node analyzer"
     )
     parser.add_argument(
         "--log-level",
         default="WARNING",
         choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
-        help="Set logging level.",
+        help="Set logging level",
     )
 
     args = parser.parse_args()
@@ -243,7 +243,7 @@ if __name__ == "__main__":
 
     m = IPDModel(
         N=args.N,
-        avg_degree=args.avg_degree,
+        avg_degree=args.avg_deg,
         payoff_matrix=payoff_matrix,
         p_same=args.p_same,
         p_diff=args.p_diff,

@@ -65,6 +65,34 @@ class MeanAgent(IPDAgent):
         return "v"   # Down triangle = "mean/aggressive"
 
 
+def tft_algorithm(
+    h: dict[int, list[dict[str, int | str]]] | None,
+    other_node: int,
+    prelude: str,
+    random: "Random",
+    noise: float=0.0,
+) -> tuple[str, str]:
+    """
+    Perform the prototypical TitForTat algorithm against an opponent with the
+    given history against them.
+    """
+    log = prelude
+    if not h:
+        choice = random.choice(["C", "D"])
+        log += f"It's my first time! ({choice})."
+        return choice, log
+
+    if random.random() < noise:
+        choice = random.choice(["C", "D"])
+        log += f"I'm going random ({choice})."
+        return choice, log
+
+    log += (
+        f"\n  Last time node {other_node} {h[-1]['other_action']}'d "
+        + f"against me. So I'm {h[-1]['other_action']}'ing them this time."
+    )
+    return h[-1]["other_action"], log
+
 @register_agent("TFT")
 class TitForTatAgent(IPDAgent):
     """Classic per-neighbor tit-for-tat (with optional noise)."""
@@ -78,24 +106,54 @@ class TitForTatAgent(IPDAgent):
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
     ) -> tuple[str, str]:
-        log = f"I'm node {self.node} (TFT), interacting with {other.node}. "
+        prelude = f"I'm node {self.node} (TFT), interacting with {other.node}. "
         h = self.history[other.node]
-        if not h:
-            choice = self.model.random.choice(["C", "D"])
-            log += f"It's my first time! ({choice})."
-            return choice, log
-
-        if self.model.random.random() < self.noise:
-            choice = self.model.random.choice(["C", "D"])
-            log += f"I'm going random ({choice})."
-            return choice, log
-
-        log += (
-            f"\n  Last time node {other.node} {h[-1]['other_action']}'d "
-            + f"against me. So I'm {h[-1]['other_action']}'ing them this time."
-        )
-        return h[-1]["other_action"], log
+        return tft_algorithm(h, other.node, prelude, self.random, self.noise)
 
     def shape(self) -> str:
         return "s"   # Square = "rule-based/fair/predictable"
 
+
+@register_agent("Browser")
+class BrowserAgent(IPDAgent):
+    """
+    Tit-for-Tats, and breaks contact with uncooperative opponents, replacing
+    them with random FOAFs.
+    """
+
+    def __init__(
+        self,
+        model: Model,
+        node: int,
+        tft_noise: float,
+        patience: int,
+    ):
+        """
+        tft_noise: passed on to the Tit-for-Tat algorithm.
+        patience: the number of consecutive D's by the opponent that this
+        agent will tolerate before severing the connection and going shopping.
+        """
+        super().__init__(model, node)
+        self.tft_noise = tft_noise
+        self.patience = patience
+
+    def decide_against(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+    ) -> tuple[str, str]:
+        prelude = (
+            f"I'm node {self.node} (Browser), interacting with {other.node}. "
+        )
+        h = self.history[other.node]
+        return tft_algorithm(
+            h,
+            other.node,
+            prelude,
+            self.random,
+            self.tft_noise,
+        )
+        return h[-1]["other_action"], log
+        
+    def shape(self) -> str:
+        return "<"   # Triangle sideways = "shopping around"
