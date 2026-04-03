@@ -21,6 +21,11 @@ def register_agent(name: str) -> Callable[[T], T]:
 
 
 class IPDAgent(Agent):
+    """
+    Base class for all IPD agents. Note: there is no ".step()" method, here or
+    in subclasses, as is traditional in Mesa. We instead require
+    ".decide_against()" for each subclass.
+    """
 
     def __init__(self, model: Model, node: int):
         super().__init__(model)
@@ -65,42 +70,13 @@ class IPDAgent(Agent):
         Return the shape your node should be in the graph. See:
         https://matplotlib.org/stable/api/markers_api.html.
         """
-        raise NotImplementedError
+        raise 's'
 
     def size(self) -> str:
         """
         Return the size your node should be in the graph.
         """
         return 300
-
-    def step(self) -> None:
-        """
-        Decide your actions for all neighbors (per-neighbor decision making).
-        (Actual payoff resolution is done in the Model.step().)
-
-        Note: this method is never called. It's now accomplished in the
-        backend, in batch for many agents.
-        """
-        self.current_decisions.clear()
-        for nbr in self.model.graph.neighbors(self.node):
-            other = self.model.node_to_agent[nbr]
-            self.current_decisions[nbr], desc = self.decide_against(
-                other,
-                self.model.payoff_matrix
-            )
-            logging.info(desc)
-
-    def decision_context(self) -> dict:
-        """
-        Return a dict to send to the LLM representing this agent. It should
-        include only things relevant to it making its decision.
-        Note: this default behavior is intended to be overridden by subclasses
-        who need (say) history information.
-        """
-        return {
-            "id": self.node,   # use node, not unique_id
-            "persona": self.persona,
-        }
 
     def __str__(self) -> str:
         return (

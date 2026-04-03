@@ -18,7 +18,6 @@ class OllamaBackend(LLMBackend):
         return cls(model_name=args.ollama_model)
 
     async def batch_decide(self, prompt: str) -> dict:
-        input(f"Stephen here; length is: {len(prompt)}")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.post(
