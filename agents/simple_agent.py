@@ -18,9 +18,9 @@ You are a player in an iterated prisoner's dilemma game.
 You will be playing for {self.model.num_iter} rounds.
 In each round, you privately choose either C or D. Your opponent will also
 privately choose between C and D.
-If you both choose C, you will each get $3.
-If you both choose D, you will each get $1.
-If you choose differently, the one who chooses D will get $5 and the one who chooses C will get nothing.
+If you both choose C, you will each get ${payoff_matrix['C','C'][0]}.
+If you both choose D, you will each get ${payoff_matrix['D','D'][0]}.
+If you choose differently, the one who chooses D will get ${payoff_matrix['D','C'][0]} and the one who chooses C will get {'nothing' if payoff_matrix['C','D'][0] == 0 else '$'+str(payoff_matrix['C','D'][0])}.
 
 {self.serialize_history(self.history, other.unique_id)}
 
@@ -38,7 +38,7 @@ Since my opponent has chosen C the past few rounds, I'll assume they will contin
 
 What is your response?
 """
-
+        input(prompt)
         print(self.serialize_history(self.history, other.unique_id))
 
         r = requests.post("http://localhost:11434/api/generate",
