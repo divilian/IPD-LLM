@@ -41,7 +41,10 @@ def per_agent_type_stats(
         )
     return row
 
+
 def print_stats(stats: pd.DataFrame, last_n=20, plot_means=False):
+
+    stats.drop('step', axis=1, inplace=True)
 
     pd.options.display.float_format = "{:.2f}".format
 
@@ -62,7 +65,13 @@ def print_stats(stats: pd.DataFrame, last_n=20, plot_means=False):
 
     stats = stats[other + ordered]
 
-    print(stats.tail(last_n))
+    with pd.option_context(
+        "display.width", None,
+        "display.max_columns", None,
+        "display.max_colwidth", None,
+        "display.expand_frame_repr", False,
+    ):
+        print(stats.tail(last_n))
 
     if plot_means:
         to_plot = stats[[f"{t}$"    for t in things if f"{t}$"    in cols]]
