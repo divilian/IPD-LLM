@@ -181,7 +181,7 @@ def interact_with_model(m: IPDModel):
         )
 
     node_num_str = input(node_prompt(m))
-    while node_num_str != "done":
+    while node_num_str != "done" and node_num_str != "":
         n = int(node_num_str)
         print(m.node_to_agent[n])
         neighs = m.network.G.neighbors(n)
