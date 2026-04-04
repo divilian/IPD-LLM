@@ -135,6 +135,11 @@ def parse_args():
         help="Ollama model to use for LLM agents"
     )
     parser.add_argument(
+        "--log",
+        action="store_true",
+        help="Log debug messages"
+    )
+    parser.add_argument(
         "--plot",
         action="store_true",
         help="Plot animation"
@@ -253,6 +258,7 @@ if __name__ == "__main__":
         num_iter=args.num_iter,
         agent_factory=factory,
         llm_backend=backend,
+        debug=args.log,
         seed=args.seed,
     )
     print(f"Running {m}")

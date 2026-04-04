@@ -167,8 +167,9 @@ class BrowserAgent(IPDAgent):
         """
         Anyone who has defected a lot recently gets the axe.
         """
-        print(f"***************************************\n"
-            f"I'm {self.unique_id} (node {self.node}), considering rewiring")
+        if self.model.debug:
+            print(f"***************************************\n"
+                f"{self.unique_id} (node {self.node}) is considering rewiring")
         my_foaf_reports = [
             c.agents[0].inform_foaf(self) for c in self.cell.neighborhood.cells
         ]
@@ -193,7 +194,8 @@ class BrowserAgent(IPDAgent):
                 self.is_adjacent_to_node(node) and
                 self._has_defected_too_often(history)
             ):
-                print(f"You're dead to me, {node}.")
+                if self.model.debug:
+                    print(f"You're dead to me, {node}.")
                 other = self.model.node_to_agent[node]
                 # This should work vvvvv but does not. See discussion #3694.
                 #self.cell.disconnect(self.model.node_to_agent[node].cell)
@@ -204,10 +206,14 @@ class BrowserAgent(IPDAgent):
                 self.num_needed_replacements += 1
 
         if self.num_needed_replacements:
-            print(f"I've terminated {self.num_needed_replacements} "
-                "connections, and will now attempt to make that many more.")
+            if self.model.debug:
+                print(f"I've terminated {self.num_needed_replacements} "
+                    "connections, and will now try to make that many more.")
+            pass
         else:
-            print("Nobody terminated; no need to make more connections.")
+            if self.model.debug:
+                print("Nobody terminated; no need to make more connections.")
+            pass
         for _ in range(self.num_needed_replacements):
             if my_foafs:
                 # In this model, people don't have to approve friend requests.
@@ -219,9 +225,11 @@ class BrowserAgent(IPDAgent):
                     self.model.node_to_agent[new_friend_node].cell,
                 )
                 my_foafs -= {new_friend_node}
-                print(f"I'm now friends with {new_friend_node}!")
+                if self.model.debug:
+                    print(f"I'm now friends with {new_friend_node}!")
             else:
-                print(f"Whoops! Nobody to replace my severed connection with.")
+                if self.model.debug:
+                    print(f"Yikes! Nobody to replace severed connection with.")
                 return
 
     def _has_defected_too_often(self, other_history):
@@ -231,15 +239,18 @@ class BrowserAgent(IPDAgent):
         interactions in the history, return False.
         """
         if len(other_history) < self.patience:
-            print(f"Not enough history to know whether to ditch this friend.")
+            if self.model.debug:
+                print(f"Not enough history to know whether to ditch this friend.")
             return False
 
         recent = other_history[-self.patience :]
         answer = all(move["other_action"] == "D" for move in recent)
         if answer:
-            print(f"Ditch this guy!")
+            if self.model.debug:
+                print(f"Ditch this guy!")
         else:
-            print(f"Stay friends with this guy.")
+            if self.model.debug:
+                print(f"Stay friends with this guy.")
         return all(move["other_action"] == "D" for move in recent)
 
     def shape(self) -> str:

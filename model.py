@@ -32,6 +32,7 @@ class IPDModel(Model):
         num_iter: int,
         agent_factory: AgentFactory,
         llm_backend: LLMBackend,
+        debug: bool,
         seed: int,
     ):
         super().__init__(seed=seed)
@@ -41,6 +42,7 @@ class IPDModel(Model):
         self.payoff_matrix = payoff_matrix
         self.num_iter = num_iter
         self.llm_backend = llm_backend
+        self.debug = debug
 
         # Distinct specs = SBM blocks (stable order)
         specs = sorted(
@@ -152,10 +154,11 @@ class IPDModel(Model):
             self._apply_llm_decisions(response['decisions'])
 
         # Okay, now we can run the fast-moving guys.
-        print(
-            f"========== Rule-based agents running in iter {self.steps} of "
-            f"{self.num_iter} =========="
-        )
+        if self.debug:
+            print(
+                f"========== Rule-based agents running in iter {self.steps} "
+                f"of {self.num_iter} =========="
+            )
         self._run_rule_agents()
 
         # Actually "commit" the moves by propagating to agent inst vars (wealth
