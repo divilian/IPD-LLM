@@ -17,7 +17,7 @@ def setup_plotting(model) -> dict:
         - norm (the normalizer used to scale wealths for plotting)
     and returns them in a "context" dict.
     """
-    pos = nx.spring_layout(model.graph, seed=model.seed, k=1.2)
+    pos = nx.spring_layout(model.network.G, seed=model.seed, k=1.2)
     cmap = mpl.colormaps["coolwarm"]  # blue->white->red
     fig, ax = plt.subplots(constrained_layout=True, figsize=(9,8))
     ax.set_axis_off()
@@ -42,27 +42,27 @@ def setup_plotting(model) -> dict:
 def plot(model, ctx, monies, t, num_iter):
     ctx["ax"].clear()
     nx.draw_networkx_edges(
-        model.graph,
+        model.network.G,
         pos=ctx["pos"],
         edge_color="black",
         width=1.0,
         ax=ctx["ax"]
     )
     nx.draw_networkx_labels(
-        model.graph,
+        model.network.G,
         pos=ctx["pos"],
         font_size=10,
         font_color="black",
         ax=ctx["ax"]
     )
-    nodes = list(model.graph.nodes())
+    nodes = list(model.network.G.nodes())
     colors = [ctx["cmap"](ctx["norm"](w)) for w in monies]
     shapes = [model.node_to_agent[i].shape() for i in nodes]
     sizes = [model.node_to_agent[i].size() for i in nodes]
     for shape in set(shapes):
         idx = [i for i, s in enumerate(shapes) if s == shape]
         nx.draw_networkx_nodes(
-            model.graph,
+            model.network.G,
             pos=ctx["pos"],
             nodelist=[nodes[i] for i in idx],
             node_color=[colors[i] for i in idx],

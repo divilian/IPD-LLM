@@ -1,6 +1,7 @@
 from typing import Tuple
 
-from mesa import Model, Agent
+from mesa import Model
+from mesa.discrete_space import CellAgent, Cell
 
 from .base import IPDAgent, register_agent
 
@@ -8,8 +9,8 @@ from .base import IPDAgent, register_agent
 class SuckerAgent(IPDAgent):
     """Always cooperates."""
 
-    def __init__(self, model: Model, node: int):
-        super().__init__(model, node)
+    def __init__(self, model: Model, cell: Cell):
+        super().__init__(model, cell)
 
     def decide_against(
         self,
@@ -28,8 +29,8 @@ class SuckerAgent(IPDAgent):
 class RandomAgent(IPDAgent):
     """Chooses randomly."""
 
-    def __init__(self, model: Model, node: int):
-        super().__init__(model, node)
+    def __init__(self, model: Model, cell: Cell):
+        super().__init__(model, cell)
 
     def decide_against(
         self,
@@ -49,8 +50,8 @@ class RandomAgent(IPDAgent):
 class MeanAgent(IPDAgent):
     """Always defects."""
 
-    def __init__(self, model: Model, node: int):
-        super().__init__(model, node)
+    def __init__(self, model: Model, cell: Cell):
+        super().__init__(model, cell)
 
     def decide_against(
         self,
@@ -97,8 +98,8 @@ def tft_algorithm(
 class TitForTatAgent(IPDAgent):
     """Classic per-neighbor tit-for-tat (with optional noise)."""
 
-    def __init__(self, model: Model, node: int, noise: float = 0.10):
-        super().__init__(model, node)
+    def __init__(self, model: Model, cell: Cell, noise: float = 0.10):
+        super().__init__(model, cell)
         self.noise = noise
 
     def decide_against(
@@ -124,7 +125,7 @@ class BrowserAgent(IPDAgent):
     def __init__(
         self,
         model: Model,
-        node: int,
+        cell: Cell,
         tft_noise: float,
         patience: int,
     ):
@@ -133,7 +134,7 @@ class BrowserAgent(IPDAgent):
         patience: the number of consecutive D's by the opponent that this
         agent will tolerate before severing the connection and going shopping.
         """
-        super().__init__(model, node)
+        super().__init__(model, cell)
         self.tft_noise = tft_noise
         self.patience = patience
 

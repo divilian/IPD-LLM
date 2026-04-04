@@ -167,12 +167,15 @@ def interact_with_model(m: IPDModel):
 
     def node_prompt(m):
         return (
-            f"Enter node ({','.join([str(n) for n in sorted(m.graph.nodes)])},"
+            f"Enter node ({','.join([
+                str(n)
+                for n in sorted(m.network.G.nodes)
+            ])},"
             "'done'): "
         )
 
     def neigh_prompt(m, n):
-        neigh_list = ','.join([str(k) for k in m.graph.neighbors(n)])
+        neigh_list = ','.join([str(k) for k in m.network.G.neighbors(n)])
         return (
             f"  Enter neighbor of {n} ({neigh_list},'done'): "
         )
@@ -181,7 +184,7 @@ def interact_with_model(m: IPDModel):
     while node_num_str != "done":
         n = int(node_num_str)
         print(m.node_to_agent[n])
-        neighs = m.graph.neighbors(n)
+        neighs = m.network.G.neighbors(n)
         if neighs:
             print("Neighbors:")
             for neigh in neighs:
@@ -189,7 +192,7 @@ def interact_with_model(m: IPDModel):
             node_num_str = input(neigh_prompt(m, n))
             while node_num_str != "done":
                 neigh = int(node_num_str)
-                if neigh in m.graph.neighbors(n):
+                if neigh in m.network.G.neighbors(n):
                     ncn = m.node_to_agent[neigh].__class__.__name__
                     print(f"History with {ncn} {neigh}:")
                     print(
@@ -259,7 +262,7 @@ if __name__ == "__main__":
 
     for t in tqdm(range(args.num_iter)):
         m.step()
-        monies = [m.node_to_agent[n].wealth for n in m.graph.nodes]
+        monies = [m.node_to_agent[n].wealth for n in m.network.G.nodes]
         if args.plot:
             plot(m, plot_context, monies, t, args.num_iter)
         row = {"step": t + 1}

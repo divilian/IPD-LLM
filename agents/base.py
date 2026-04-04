@@ -2,7 +2,8 @@ from collections.abc import Callable
 from typing import TypeVar
 from collections import defaultdict
 
-from mesa import Agent, Model
+from mesa import Model
+from mesa.discrete_space import CellAgent, Cell
 
 
 T = TypeVar("T")
@@ -20,16 +21,16 @@ def register_agent(name: str) -> Callable[[T], T]:
     return decorator
 
 
-class IPDAgent(Agent):
+class IPDAgent(CellAgent):
     """
     Base class for all IPD agents. Note: there is no ".step()" method, here or
     in subclasses, as is traditional in Mesa. We instead require
     ".decide_against()" for each subclass.
     """
 
-    def __init__(self, model: Model, node: int):
+    def __init__(self, model: Model, cell: Cell):
         super().__init__(model)
-        self.node = node
+        self.cell = cell
         self.current_iter_payment = 0
 
         # history[other_node] = list of {step, self_action, other_action}
@@ -103,6 +104,10 @@ class IPDAgent(Agent):
         Return the size your node should be in the graph.
         """
         return 300
+
+    @property
+    def node(self) -> int:
+        return self.cell.coordinate
 
     def __str__(self) -> str:
         return (

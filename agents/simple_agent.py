@@ -1,13 +1,14 @@
 import requests
-from mesa import Model, Agent
+from mesa import Model
+from mesa.discrete_space import CellAgent, Cell
 
 from .base import IPDAgent, register_agent
 
 
 @register_agent("SimpleLLM")
 class SimpleLLMAgent(IPDAgent):
-    def __init__(self, model: Model, node: int):
-        super().__init__(model, node)
+    def __init__(self, model: Model, cell: Cell):
+        super().__init__(model, cell)
     def decide_against(
         self,
         other: "IPDAgent",

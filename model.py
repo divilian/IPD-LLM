@@ -4,6 +4,7 @@ from collections import Counter
 import asyncio
 
 from mesa import Model, DataCollector
+from mesa.discrete_space import Network
 import networkx as nx
 import numpy as np
 
@@ -53,17 +54,19 @@ class IPDModel(Model):
         p = p_diff * np.ones((num_agent_types, num_agent_types))
         for i in range(num_agent_types):
             p[i][i] = p_same
-        self.graph = nx.stochastic_block_model(sizes, p, seed=self.seed)
+        graph = nx.stochastic_block_model(sizes, p, seed=self.seed)
+        self.network = Network(graph, random=self.random)
 
-        nodes = list(self.graph.nodes)
+        cells = self.network.all_cells.cells
         idx = 0
         self.node_to_agent = {}
         for (agent_cls, kwargs_items), sz in zip(specs, sizes):
             init_kwargs = dict(kwargs_items)
             for _ in range(sz):
-                node = nodes[idx]
-                agent = agent_cls(self, node, **init_kwargs)
-                self.node_to_agent[node] = agent
+                cell = cells[idx]
+                # Actually instantiate the agent.
+                agent = agent_cls(self, cell, **init_kwargs)
+                self.node_to_agent[cell.coordinate] = agent
                 idx += 1
         self.agent_to_node = {
             agent: node
@@ -77,16 +80,16 @@ class IPDModel(Model):
                 "coop_rate": self._coop_rate,
                 "avg_degree":
                     lambda m: (
-                        sum(dict(m.graph.degree()).values())
-                        / m.graph.number_of_nodes()
+                        sum(dict(m.network.G.degree()).values())
+                        / m.network.G.number_of_nodes()
                     )
-                    if m.graph.number_of_nodes()
+                    if m.network.G.number_of_nodes()
                     else 0.0,
             }
         )
 
         # Peace of mind that node IDs and agent IDs haven't drifted weirdly.
-        assert set(self.node_to_agent.keys()) == set(self.graph.nodes)
+        assert set(self.node_to_agent.keys()) == set(self.network.G.nodes)
         assert all(a.node == n for n, a in self.node_to_agent.items())
 
     def assortativity(self) -> float:
@@ -98,12 +101,15 @@ class IPDModel(Model):
         connect to different types (a TitForTat to Means and Suckers, e.g.)
         """
         nx.set_node_attributes(
-            self.graph,
+            self.network.G,
             {node: agent.__class__.__name__
              for node, agent in self.node_to_agent.items()},
             name="agent_type",
         )
-        return nx.attribute_assortativity_coefficient(self.graph, "agent_type")
+        return nx.attribute_assortativity_coefficient(
+            self.network.G,
+            "agent_type",
+        )
 
     def _coop_rate(self) -> float:
         total = 0
@@ -176,7 +182,7 @@ class IPDModel(Model):
                 raise ValueError(f"Unknown agent id from LLM! {aid}")
             if oid not in self.node_to_agent:
                 raise ValueError(f"Unknown opponent id from LLM! {oid}")
-            if oid not in set(self.graph.neighbors(aid)):
+            if oid not in set(self.network.G.neighbors(aid)):
                 raise ValueError(
                     f"LLM gave non-neighbor opponent {oid} for agent {aid}!"
                 )
@@ -185,7 +191,7 @@ class IPDModel(Model):
     def _run_rule_agents(self) -> None:
         rule_agents = [a for a in self.agents if not isinstance(a, LLMAgent)]
         for ra in rule_agents:
-            for n in self.graph.neighbors(ra.node):
+            for n in self.network.G.neighbors(ra.node):
                 ra.current_decisions[n], _ = ra.decide_against(
                     self.node_to_agent[n],
                     self.payoff_matrix,
@@ -202,7 +208,7 @@ class IPDModel(Model):
         for a in self.agents:
             i = a.node
 
-            for j in self.graph.neighbors(i):
+            for j in self.network.G.neighbors(i):
 
                 if (j, i) in processed:
                     continue
@@ -226,7 +232,7 @@ class IPDModel(Model):
         # disadvantaging agents with fewer neighbors who of course therefore
         # play fewer rounds and hence have lower winnings.
         for a in self.agents:
-            k = self.graph.degree[a.node]
+            k = self.network.G.degree[a.node]
             if k > 0:
                 a.wealth += a.current_iter_payment / k
 
@@ -259,6 +265,6 @@ class IPDModel(Model):
         ret_val = "with this agent mix:\n"
         am = [f"{c:>18}:{n:>5}" for c, n in self.agent_mix().items()]
         ret_val += "\n".join(am)
-        ret_val += f"\nThe graph has {self.graph.size()} edges "
+        ret_val += f"\nThe graph has {self.network.G.size()} edges "
         ret_val += f"and assortativity {self.assortativity():.3f}."
         return ret_val
