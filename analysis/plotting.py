@@ -40,6 +40,8 @@ def setup_plotting(model) -> dict:
 
 
 def plot(model, ctx, monies, t, num_iter):
+    # Update node positions gracefully.
+    ctx["pos"] = nx.spring_layout(model.network.G, pos=ctx["pos"], k=1.2)
     ctx["ax"].clear()
     nx.draw_networkx_edges(
         model.network.G,
