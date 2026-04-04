@@ -79,7 +79,7 @@ class IPDAgent(CellAgent):
 
     def inform_foaf(
         self,
-        other: "IPDAgent",
+        inquirer: "IPDAgent",
     ) -> dict[int, list[dict[str, int | str]]] | None:
         """
         Return a reported interaction history keyed by opponent node number.

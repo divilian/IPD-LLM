@@ -152,11 +152,18 @@ class IPDModel(Model):
             self._apply_llm_decisions(response['decisions'])
 
         # Okay, now we can run the fast-moving guys.
+        print(
+            f"========== Rule-based agents running in iter {self.steps} of "
+            f"{self.num_iter} =========="
+        )
         self._run_rule_agents()
 
         # Actually "commit" the moves by propagating to agent inst vars (wealth
         # and history).
         self._resolve_payoffs()
+
+        # Permit all agents to sever and form connections as they desire.
+        self._permit_rewiring()
 
         # Stuff happened, in case you care.
         self.datacollector.collect(self)
@@ -235,6 +242,14 @@ class IPDModel(Model):
             k = self.network.G.degree[a.node]
             if k > 0:
                 a.wealth += a.current_iter_payment / k
+
+    def _permit_rewiring(self) -> None:
+        """
+        Yes, there's an ordering issue here; whoever goes first can sever a
+        connection that that later agent won't have when it goes to rewire.
+        Oh well.
+        """
+        self.agents.shuffle_do("rewire_as_desired", self.payoff_matrix)
 
     def estimate_expected_avg_wealth(self):
         """

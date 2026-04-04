@@ -7,6 +7,7 @@
 
 ## Bug fixes
 
+- [ ] Fix typehint everywhere on `payoff_matrix`: should be `dict[tuple[str, str], tuple[int, int]]`
 - [ ] How does `--avg-degree` combine with `--p-same/diff`?
 - [x] There's still some LLM-related stuff in the IPDAgent base class
 - [ ] Add payoffs to global prompt text
@@ -38,6 +39,7 @@
 ## Model
 
 - [ ] Agents which seek to break/form connections with better players
+    - [ ] Should agents have to approve friend requests? Interesting!
 - [ ] LLMAgents which seek to lose
 - [ ] LLMAgents which seek to maximize total combined winnings, not just theirs
 - [ ] `AmnesiacAgent` (remembers past plays, but not by whom. tit-for-tats)

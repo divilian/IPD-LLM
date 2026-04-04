@@ -156,5 +156,91 @@ class BrowserAgent(IPDAgent):
         )
         return h[-1]["other_action"], log
         
+    def is_adjacent_to_node(self, x):
+        return any(
+            (cell.coordinate == x for cell in self.cell.neighborhood.cells)
+        )
+
+    def rewire_as_desired(
+        self,
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]]):
+        """
+        Anyone who has defected a lot recently gets the axe.
+        """
+        print(f"***************************************\n"
+            f"I'm {self.unique_id} (node {self.node}), considering rewiring")
+        my_foaf_reports = [
+            c.agents[0].inform_foaf(self) for c in self.cell.neighborhood.cells
+        ]
+        my_foafs = {
+            foaf_node
+            for fr in my_foaf_reports
+            if fr is not None
+            for foaf_node in fr
+        }
+        my_foafs -= {self.node}
+
+        # Keep track of how many connections I've severed, so that I know how
+        # many new connections to make when I'm done severing. (So as to
+        # preserve this node's degree to the extent possible.)
+        self.num_needed_replacements = 0
+        for node, history in self.history.items():
+            if (
+                # Even if we've previously severed connections with this agent,
+                # we still have its history from before our breakup. So we need
+                # to check whether the node we think we want to ditch is
+                # actually still a neighbor!
+                self.is_adjacent_to_node(node) and
+                self._has_defected_too_often(history)
+            ):
+                print(f"You're dead to me, {node}.")
+                other = self.model.node_to_agent[node]
+                # This should work vvvvv but does not. See discussion #3694.
+                #self.cell.disconnect(self.model.node_to_agent[node].cell)
+                self.model.network.remove_connection(
+                    self.cell,
+                    self.model.node_to_agent[node].cell,
+                )
+                self.num_needed_replacements += 1
+
+        if self.num_needed_replacements:
+            print(f"I've terminated {self.num_needed_replacements} "
+                "connections, and will now attempt to make that many more.")
+        else:
+            print("Nobody terminated; no need to make more connections.")
+        for _ in range(self.num_needed_replacements):
+            if my_foafs:
+                # In this model, people don't have to approve friend requests.
+                new_friend_node = self.model.random.choice(list(my_foafs))
+                # This should work vvvvv but does not. See discussion #3694.
+                #self.cell.connect(self.model.node_to_agent[new_friend_node])
+                self.model.network.add_connection(
+                    self.cell,
+                    self.model.node_to_agent[new_friend_node].cell,
+                )
+                my_foafs -= {new_friend_node}
+                print(f"I'm now friends with {new_friend_node}!")
+            else:
+                print(f"Whoops! Nobody to replace my severed connection with.")
+                return
+
+    def _has_defected_too_often(self, other_history):
+        """
+        Return True iff the other agent has defected in each of the most recent
+        `self.patience` interactions. If there are fewer than `self.patience`
+        interactions in the history, return False.
+        """
+        if len(other_history) < self.patience:
+            print(f"Not enough history to know whether to ditch this friend.")
+            return False
+
+        recent = other_history[-self.patience :]
+        answer = all(move["other_action"] == "D" for move in recent)
+        if answer:
+            print(f"Ditch this guy!")
+        else:
+            print(f"Stay friends with this guy.")
+        return all(move["other_action"] == "D" for move in recent)
+
     def shape(self) -> str:
         return "<"   # Triangle sideways = "shopping around"
