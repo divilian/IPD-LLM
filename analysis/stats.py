@@ -1,8 +1,12 @@
+from collections import defaultdict
+from typing import Type
 import re
 
 import pandas as pd
+from mesa.discrete_space import CellAgent
 
 from model import IPDModel
+
 
 def per_agent_type_stats(
     model: IPDModel,
@@ -40,6 +44,126 @@ def per_agent_type_stats(
             else 0.0
         )
     return row
+
+
+def print_agent_type_adjacency_matrix(
+    network,
+    weighted: bool = False,
+) -> pd.DataFrame:
+    """
+    Print a row-normalized matrix showing, for each CellAgent subclass, the
+    average percentage of its neighbors that belong to each other subclass.
+
+    Parameters
+    ----------
+    network : mesa.discrete_space.Network
+        A Mesa Network object whose cells contain agents.
+    weighted : bool, default False
+        If False, each agent contributes equally to the average for its row
+        type. This is usually what "on average" means.
+
+        If True, agents with more neighbors contribute more heavily, because
+        the percentages are computed from pooled edge counts for each type.
+
+    Returns
+    -------
+    pd.DataFrame
+        The percentage matrix as a DataFrame (values are floats from 0 to 100).
+
+    Notes
+    -----
+    - Rows are focal agent types.
+    - Columns are neighbor agent types.
+    - Each row sums to about 100% (unless a type has no neighbors at all).
+    - After row-normalization, the matrix is *not* guaranteed to be symmetric,
+      even if the underlying graph is undirected.
+    """
+
+    # Gather all agents from all cells.
+    agents: list[CellAgent] = []
+    for cell in network.all_cells:
+        agents.extend(cell.agents)
+
+    if not agents:
+        print("(No agents found.)")
+        return pd.DataFrame()
+
+    agent_types: list[Type[CellAgent]] = sorted(
+        {type(agent) for agent in agents},
+        key=lambda cls: cls.__name__,
+    )
+    type_names = [cls.__name__ for cls in agent_types]
+
+    # ------------------------------------------------------------
+    # Option 1: true per-agent average of neighbor composition
+    # ------------------------------------------------------------
+    if not weighted:
+        row_sums = defaultdict(lambda: defaultdict(float))
+        row_counts = defaultdict(int)
+
+        for agent in agents:
+            focal_type = type(agent)
+
+            # Count this agent's neighbors by type.
+            neighbor_counts = defaultdict(int)
+            total_neighbors = 0
+
+            for neighbor_cell in agent.cell.neighborhood:
+                for neighbor_agent in neighbor_cell.agents:
+                    neighbor_counts[type(neighbor_agent)] += 1
+                    total_neighbors += 1
+
+            # If this agent has no neighbors, skip it.
+            if total_neighbors == 0:
+                continue
+
+            for neighbor_type in agent_types:
+                pct = 100 * neighbor_counts[neighbor_type] / total_neighbors
+                row_sums[focal_type][neighbor_type] += pct
+
+            row_counts[focal_type] += 1
+
+        matrix = []
+        for focal_type in agent_types:
+            row = []
+            n = row_counts[focal_type]
+            for neighbor_type in agent_types:
+                val = row_sums[focal_type][neighbor_type] / n if n > 0 else 0.0
+                row.append(val)
+            matrix.append(row)
+
+    # ------------------------------------------------------------
+    # Option 2: pooled-edge version (high-degree agents count more)
+    # ------------------------------------------------------------
+    else:
+        pooled_counts = defaultdict(lambda: defaultdict(int))
+
+        for agent in agents:
+            focal_type = type(agent)
+            for neighbor_cell in agent.cell.neighborhood:
+                for neighbor_agent in neighbor_cell.agents:
+                    pooled_counts[focal_type][type(neighbor_agent)] += 1
+
+        matrix = []
+        for focal_type in agent_types:
+            total = sum(pooled_counts[focal_type].values())
+            row = []
+            for neighbor_type in agent_types:
+                val = (
+                    100 * pooled_counts[focal_type][neighbor_type] / total
+                    if total > 0
+                    else 0.0
+                )
+                row.append(val)
+            matrix.append(row)
+
+    df = pd.DataFrame(matrix, index=type_names, columns=type_names)
+
+    # Pretty-print as percentages.
+    pretty = df.map(lambda x: f"{x:.0f}%")
+    print(pretty.to_string())
+
+    return df
 
 
 def print_stats(stats: pd.DataFrame, last_n=20, plot_means=False):

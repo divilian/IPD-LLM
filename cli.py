@@ -26,7 +26,11 @@ from agents.personas import PERSONAS
 from llm.ollama_backend import ensure_ollama_running
 from llm.backend import create_backend
 from agents.factory import AgentFactory
-from analysis.stats import per_agent_type_stats, print_stats
+from analysis.stats import (
+    per_agent_type_stats,
+    print_stats,
+    print_agent_type_adjacency_matrix,
+)
 from analysis.plotting import setup_plotting, plot
 
 
@@ -262,6 +266,8 @@ if __name__ == "__main__":
         seed=args.seed,
     )
     print(f"Running {m}")
+    print("Before simulation, agent-type adjacency:")
+    print_agent_type_adjacency_matrix(m.network)
 
     if args.plot:
         plot_context = setup_plotting(m)
@@ -274,6 +280,9 @@ if __name__ == "__main__":
         row = {"step": t + 1}
         row.update(per_agent_type_stats(m))
         stats.append(row)
+
+    print("After simulation, agent-type adjacency:")
+    print_agent_type_adjacency_matrix(m.network)
 
     stats = pd.DataFrame(stats)
     print_stats(stats)
