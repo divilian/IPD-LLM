@@ -33,7 +33,7 @@ class IPDModel(Model):
         llm_backend: LLMBackend,
         seed: int,
     ):
-        super().__init__(seed=seed)
+        super().__init__(rng=seed)
 
         self.N = N
         self.seed = seed
