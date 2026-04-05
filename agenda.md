@@ -19,6 +19,8 @@
 
 ## Improvements
 
+* [ ] Make Browser "patience" a command-line arg
+
 ### Original-LLM-design-specific
 
 - [ ] Figure out why LLMs are so slow now! Increased prompt size? (Chat says
@@ -35,6 +37,8 @@
 - [x] Add agent query mode, where you can interactively type a node number and
   get its number and types of neighbors
 - [ ] Analyze on a per-dyad basis
+- [x] Print agent-type-based adjacency matrix, before and after
+* [ ] How does the patience parameter impact how well the Browsers do?
 
 ## Model
 
