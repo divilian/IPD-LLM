@@ -1,0 +1,74 @@
+Okay, Perplexity, I choose you for my task today; let's see how you do.
+
+I'm going to lay out my entire situation.
+
+I had neck surgery yesterday, and am home recovering. So far the recovery is
+going pretty well, and I have good meds, but I do need to get a lot of computer
+work done as well. Plus it's a nice day out today and the doctor recommended a
+walk, so I'd like to do that at some point, perhaps in the late afternoon.
+
+Okay, so here's the deal. Sunday April 12th (today is Friday the 10th) is the
+deadline for the SSC 2026 conference submissions. Here's the conference website:
+https://www.durham.ac.uk/research/institutes-and-centres/research-methods/social-simulation-conference-2026/
+and the call:
+
+<callForSubmission>
+When submitting your paper, you will be asked to choose a submission type and relevant special track(s). The four types of submissions available are:
+
+    Poster: 300-500 word abstract, to be presented as a poster at the dedicated poster session at the conference
+    Extended abstract: 3-4 pages, can be work in progress
+    Full paper for presentation only: 6-12 pages, should be complete papers with model design, results and conclusions (or other appropriate content), but can include work in progress elements 
+    Full paper intended for proceedings: 6-12 pages, should be complete papers with model design, results and conclusions (or other appropriate content). These papers may be subject to additional review.
+
+Accepted posters will displayed during the dedicated poster session. Accepted extended abstracts and full papers are to be presented at the conference, with a timeslot of 10 to 20 minutes depending on type of paper and number of accepted submissions. Papers will only be considered for publication in the proceedings if they are submitted as full papers intended for the proceedings.
+
+All work must be original, it should not have appeared in conference proceedings, books or journals, and must not be under review for other conferences, books or journals.
+
+The review process is quicker and less onerous if many reviewers are available. If you are a co-author on several papers or an established researcher, you may be expected to review submissions.
+
+Deadline for submission is 12 April 2026. We expect to notify authors of accepted submissions in May.
+
+To submit a paper, please follow the link to the submission site . Note that you will need to register on the site before you are able to submit. LaTeX and Word templates for abstracts and papers are available from the Springer site.
+
+When you submit your paper, you will be asked to select relevant special tracks. Please indicate the special tracks that you feel your paper is most likely to fit. Note, however, that your paper may be allocated to a different special track if there is a better fit once we can see all the accepted papers.
+</callForSubmission>
+
+
+As you can probably surmise from other threads in this space, my topic is for
+the "Generate AI meets Agent-Based Modelling" track, organized by Peer-Olaf
+Siebers, a guy who has an LLM4ABM special interest group (SIG) that I've been
+attending over Zoom for the past few months. Here's the call for that track:
+
+<callForLlm4AbmSigTrack>
+The integration of Generative Artificial Intelligence (GenAI) with Agent-Based Modelling (ABM) represents a transformative advancement in social simulation. This combination enables high‑fidelity models in which agents retain the transparency of rule‑based systems whilst gaining the context‑aware reasoning capabilities of Large Language Models (LLMs).
+
+LLMs can function as cognitive components within agents, supporting new approaches to modelling human‑like reasoning. They also offer opportunities to enhance the entire ABM cycle: from problem formulation and literature synthesis, through conceptualisation by translating narratives into structured models, to implementation via code generation and results communication through stakeholder-tailored reporting.
+
+However, this integration also presents significant challenges. We must ensure that GenAI-augmented models maintain the interpretability and validation standards essential to social science.
+
+This special track invites contributions on GenAI-augmented ABM, including theoretical and methodological advances, applications across the ABM cycle, domain-specific applications, validation techniques, ethics and critical perspectives, and emerging techniques and technologies.
+</callForLlm4AbmSigTrack>
+
+I've currently done a lot of thinking, and written a lot of working code, for
+my topic: using LLM-backed agents to play IPD (iterated prisoner's dilemma) on
+a network, in which agents not only decide what move to play each round against
+each network neighbor (cooperate or defect) but also decide whether to sever
+network connections with opponents deemed undesirable, form additional links
+with promising new opponents discovered through FOAF contacts, and deciding
+whether to provide that FOAF information to neighbors when their neighbors
+request it, possibly choosing to lie when providing information to FOAFs.
+
+Since the deadline is on the 12th, that gives us three pretty solid days in
+which to create a good submission.
+
+One thing you and I need to decide (not necessarily first, but probably today)
+is which kind of submission to make: poster, extended abstract, full paper
+(presentation only), or full paper (intended for proceedings). I would prefer
+the last option, but the question is whether I have enough time to meaningfully
+do that. I think one thing we'll discover as we work today is whether that's
+realistic, or whether I need to back off to one of the shorter / lower-stakes
+options.
+
+Okay, that's the full sitrep. What are your initial thoughts about how to
+proceed? I've got some initial thoughts on that as well, but let me get yours
+first.

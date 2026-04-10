@@ -83,4 +83,32 @@ Two super important notes:
 
 2) Take your time in responding to this. A correct and complete response is much better than a quick response.
 
+
+############################
+
+Perplexity LLM+IPD prompt
+
+okay, so what i'm most interested in studying for this paper is the following:
+
+1) the traditional IPD game, played with agents on a network
+
+2) the agent pool will be comprised of classic simple rule-based strategies (always defect, always cooperate, tit-for-tat, random) and then some LLM-based agents which are prompted with various experimental prompts
+
+3) both rule-based agents and LLM agents will make decisions about three things: (a) what move to make in each turn of the game with each of its neighbors, given the history of the game so far and knowledge about how many more rounds the game will last (i could make the game length probabilistic instead of deterministic if that looks like promising new ground), (b) whether to sever links with any of its current network neighbors, and whether to form new links with any of its FOAFs (friends-of-a-friend) using information from those current neighbors about the game history with the FOAFs, and (c) whether or not to share information with another agent about one's game history with a FOAF, and whether or not to lie about that game history when reporting it.
+
+4) when LLM-based agents make decisions, they will not only report what that
+decision is (for the game infrastructure to use in resolving payoffs and
+updating the graph) but also report its rationale for making it.
+
+I'm thinking that although I'll gather metrics on which kinds of players do the
+best in the game quantitatively, my main research finding will be a more
+qualitative look at the rationales that these LLM agents provide. I'll be
+trying to draw general conclusions about how LLMs behave in such games and in
+how they interpret their own behavior.
+
+Okay, so how much of the above is novel? Take your time in answering. If this
+inquiry is better posed in one of Perplexity's alternate communication channels
+(i.e., something on the "Discover" or "Academic" tab, rather than here in a
+thread) please let me know so I can ask it that way instead.
+
 vim:textwidth=99999
