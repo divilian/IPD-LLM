@@ -88,7 +88,7 @@ def parse_args():
         "--avg-deg",
         type=float,
         default=3.0,
-        help="Target average degree of nodes in graph"
+        help="Target average degree of nodes in graph",
     )
     parser.add_argument(
         "--p-same",
@@ -112,13 +112,13 @@ def parse_args():
         "--num-iter",
         type=int,
         default=25,
-        help="Number of simulation iterations (def: 25)"
+        help="Number of simulation iterations (def: 25)",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=12345,
-        help="Seed for rng's; starting (walking) seed for graph rng"
+        help="Seed for rng's; starting (walking) seed for graph rng",
     )
     parser.add_argument(
         "--tft-noise",
@@ -137,28 +137,28 @@ def parse_args():
         type=str,
         choices=["ollama", "mock", "llamacpp"],
         default="ollama",
-        help="LLM backend to use"
+        help="LLM backend to use",
     )
     parser.add_argument(
         "--ollama-model",
         type=str,
-        default="llama3.1:latest",
-        help="Ollama model to use for LLM agents"
+        default="llama3.1:8b-instruct-q4_K_M",
+        help="Ollama model to use for LLM agents",
     )
     parser.add_argument(
         "--log",
         action="store_true",
-        help="Log debug messages"
+        help="Log debug messages",
     )
     parser.add_argument(
         "--plot",
         action="store_true",
-        help="Plot animation"
+        help="Plot animation",
     )
     parser.add_argument(
         "--analyze",
         action="store_true",
-        help="Launch interactive node analyzer"
+        help="Launch interactive node analyzer",
     )
     parser.add_argument(
         "--log-level",
