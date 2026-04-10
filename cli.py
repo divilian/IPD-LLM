@@ -12,6 +12,7 @@ Install:
 Run syntax:
   python pris.py -h
 """
+from pathlib import Path
 import argparse
 import logging
 from tqdm import tqdm
@@ -126,6 +127,12 @@ def parse_args():
         help="Tit-for-tat noise rate for some agent types (def: 0.1)",
     )
     parser.add_argument(
+        "--llm-out-file",
+        type=str,
+        default="llm.out",
+        help="Name of file (or None) to store LLM output (default llm.out)",
+    )
+    parser.add_argument(
         "--backend",
         type=str,
         choices=["ollama", "mock", "llamacpp"],
@@ -219,17 +226,29 @@ def interact_with_model(m: IPDModel):
         node_num_str = input(node_prompt(m))
 
 
-if __name__ == "__main__":
-
-    args = parse_args()
-
+def setup_llms_and_logging(args):
     if any(['LLM' in a for a in args.agent_fracs]):
         ensure_ollama_running(args.ollama_model)
-
+        out_path = Path(args.llm_out_file)
+        if out_path.exists():
+            clob = input(
+                f"Clobber existing {args.llm_out_file} file? (y/n) ",
+            ).strip().lower()
+            if clob == "y":
+                out_path.unlink()
+            with open(out_path, "w", encoding="utf-8") as f:
+                print("=============================================", file=f)
     logging.basicConfig(
         level=args.log_level,
         format="%(message)s"
     )
+
+
+if __name__ == "__main__":
+
+    args = parse_args()
+
+    setup_llms_and_logging(args)
 
     stats = []
 
@@ -261,6 +280,7 @@ if __name__ == "__main__":
         p_diff=args.p_diff,
         num_iter=args.num_iter,
         agent_factory=factory,
+        llm_out_file=args.llm_out_file,
         llm_backend=backend,
         debug=args.log,
         seed=args.seed,

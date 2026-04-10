@@ -55,7 +55,13 @@ What is your response?
         )
         resp = r.json()['response']
         decision, rationale = resp.split(",",1)
-        print(f"DECISION: {decision}. RATIONALE: {rationale}")
+        with open(self.model.llm_out_file, "a", encoding="utf-8") as f:
+            print(
+                "---------------------------------------------------\n" +
+                self.serialize_history(self.history, other.unique_id),
+                file=f,
+            )
+            print(f"DECISION: {decision}. RATIONALE: {rationale}", file=f)
         return decision, rationale
 
     def shape(self) -> str:
@@ -65,8 +71,8 @@ What is your response?
         return 2000
 
     def serialize_history(self, history, oid):
-        if not history:
-            return f"This is the first move in your game with this opponent ({oid-1})."
+        if not history or not history[oid-1]:
+            return f"This is the first move in your game with this opponent ({oid-1}).\n"
         prompt = f"Here is the history of your games with this opponent ({oid-1}) so far:\n"
         for h in history[oid-1]:
             prompt += f"On turn {h['step']}, you chose {h['self_action']} and your opponent chose {h['other_action']}.\n"
