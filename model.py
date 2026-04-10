@@ -32,6 +32,7 @@ class IPDModel(Model):
         num_iter: int,
         agent_factory: AgentFactory,
         llm_backend: LLMBackend,
+        ollama_model: str,
         llm_out_file: str,
         debug: bool,
         seed: int,
@@ -43,6 +44,7 @@ class IPDModel(Model):
         self.payoff_matrix = payoff_matrix
         self.num_iter = num_iter
         self.llm_backend = llm_backend
+        self.ollama_model = ollama_model
         self.llm_out_file = llm_out_file
         self.debug = debug
 

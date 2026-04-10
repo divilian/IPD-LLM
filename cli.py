@@ -133,6 +133,11 @@ def parse_args():
         help="Name of file (or None) to store LLM output (default llm.out)",
     )
     parser.add_argument(
+        "--llm-out-file-clobber",
+        action="store_true",
+        help="Auto-clobber LLM output file if exists? (default false)",
+    )
+    parser.add_argument(
         "--backend",
         type=str,
         choices=["ollama", "mock", "llamacpp"],
@@ -231,13 +236,16 @@ def setup_llms_and_logging(args):
         ensure_ollama_running(args.ollama_model)
         out_path = Path(args.llm_out_file)
         if out_path.exists():
-            clob = input(
-                f"Clobber existing {args.llm_out_file} file? (y/n) ",
-            ).strip().lower()
-            if clob == "y":
+            if args.llm_out_file_clobber:
                 out_path.unlink()
-            with open(out_path, "w", encoding="utf-8") as f:
-                print("=============================================", file=f)
+            else:
+                clob = input(
+                    f"Clobber existing {args.llm_out_file} file? (y/n) ",
+                ).strip().lower()
+                if clob == "y":
+                    out_path.unlink()
+        with open(out_path, "a", encoding="utf-8") as f:
+            print("=============================================", file=f)
     logging.basicConfig(
         level=args.log_level,
         format="%(message)s"
@@ -281,6 +289,7 @@ if __name__ == "__main__":
         num_iter=args.num_iter,
         agent_factory=factory,
         llm_out_file=args.llm_out_file,
+        ollama_model=args.ollama_model,
         llm_backend=backend,
         debug=args.log,
         seed=args.seed,

@@ -43,7 +43,7 @@ What is your response?
 """
         r = requests.post("http://localhost:11434/api/generate",
             json={
-                "model": "llama3.1",
+                "model": self.model.ollama_model,
                 "prompt": prompt,
                   "options": {
                     "seed": 123,
