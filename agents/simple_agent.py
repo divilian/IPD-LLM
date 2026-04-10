@@ -27,6 +27,8 @@ If you choose differently, the one who chooses D will get ${payoff_matrix['D','C
 
 There are {self.model.num_iter - self.model.steps + 1} turns left in the game, including the one you are making a decision about now.
 
+You should act in a way that will maximize your total winnings over the complete course of the game. You are indifferent to whether or not your opponent wins anything. If your opponent wins a lot during the game, or a little, or none at all, it is all the same to you.
+
 What do you choose? You must choose either C or D for this turn.
 
 Your answer must be in two comma-separated parts. The first part must be the single letter C or D. Then, after a comma, you should give a short rationale for why you made this move.
@@ -39,9 +41,6 @@ Since my opponent has chosen C the past few rounds, I'll assume they will contin
 
 What is your response?
 """
-        input(prompt)
-        print(self.serialize_history(self.history, other.unique_id))
-
         r = requests.post("http://localhost:11434/api/generate",
             json={
                 "model": "llama3.1",
