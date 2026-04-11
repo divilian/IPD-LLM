@@ -2,9 +2,25 @@
 
 ## SCC paper related
 
+### Prompt Ablations
+
+How much should I tell it about the game at once?
+
+- give it specific curated metrics (mutual cooperation rate, last n moves, etc.) for use in deciding, or just a raw game history?
+
+- valorizing "mutual cooperation"
+
+Now I can _measure_ how much I'm "steering" towards a particular strategy.
+
+### Misc
+
+- [ ] Capture rewiring decisions with datacollector
+- [ ] Lower temperature (this is about policy calls, not creative output. Lower
+  temp doesn't mean fancier strategies aren't available, but rather that it'll
+  be less stochastic in choosing from its learned distribution.)
 - [ ] Spin up a GC instance to run at scale
-- [ ] Enable LLMs to rewire their local graph and to request information from
-  peers
+- [ ] Enable LLMs to rewire their local graph and to request info from peers
+    - [ ] Enable agents to lie and to refuse
 - [ ] Calculate action metrics (C vs D's; total $ earned; number of rewires;
   etc) based on agent type
 - [ ] Experiment with a small number of different prompts
