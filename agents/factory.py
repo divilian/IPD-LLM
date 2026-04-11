@@ -25,7 +25,7 @@ def resolve_agent_spec(
       "LLMgrudge"   -> (LLMAgent, {"persona": "grudge"})
       "LLMvanilla"  -> (LLMAgent, {"persona": "vanilla"})
     """
-    if name == "tft":
+    if name == "TFT":
         return TitForTatAgent, {"noise": args.tft_noise}
     if name == "Browser":
         return BrowserAgent, {"tft_noise": args.tft_noise, "patience":3}
