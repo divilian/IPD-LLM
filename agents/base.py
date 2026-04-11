@@ -59,10 +59,14 @@ class IPDAgent(CellAgent):
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        give_rationale: bool,
     ) -> tuple[str, str]:
         """
         Make a decision against another agent. Return your decision ("C" or
-        "D") and a description of the interaction (for logging).
+        "D") and, if give_rationale is True, a description of the interaction
+        (for logging). (If give_rationale is False, agents must still return an
+        empty string as the second element of the returned tuple, for
+        simplicity.)
         """
         raise NotImplementedError
 

@@ -130,12 +130,17 @@ def parse_args():
         "--llm-out-file",
         type=str,
         default="llm.out",
-        help="Name of file (or None) to store LLM output (default llm.out)",
+        help="Name of file (or None) to store LLM output (def: llm.out)",
+    )
+    parser.add_argument(
+        "--give-rationales",
+        action="store_true",
+        help="Include rationales narrating moves in log files? (def: false)",
     )
     parser.add_argument(
         "--llm-out-file-clobber",
         action="store_true",
-        help="Auto-clobber LLM output file if exists? (default false)",
+        help="Auto-clobber LLM output file if exists? (def: false)",
     )
     parser.add_argument(
         "--backend",
@@ -288,6 +293,7 @@ if __name__ == "__main__":
         p_diff=args.p_diff,
         num_iter=args.num_iter,
         agent_factory=factory,
+        give_rationales=args.give_rationales,
         llm_out_file=args.llm_out_file,
         ollama_model=args.ollama_model,
         llm_backend=backend,

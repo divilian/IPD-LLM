@@ -13,54 +13,65 @@ class SimpleLLMAgent(IPDAgent):
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        give_rationale: bool,
     ) -> tuple[str, str]:
-        prompt = f"""
-You are a player in an iterated prisoner's dilemma game.
-You will be playing for {self.model.num_iter} rounds.
-In each round, you privately choose either C or D. Your opponent will also
-privately choose between C and D.
-If you both choose C, you will each get ${payoff_matrix['C','C'][0]}.
-If you both choose D, you will each get ${payoff_matrix['D','D'][0]}.
-If you choose differently, the one who chooses D will get ${payoff_matrix['D','C'][0]} and the one who chooses C will get {'nothing' if payoff_matrix['C','D'][0] == 0 else '$'+str(payoff_matrix['C','D'][0])}.
+        prompt = f"""You are playing an iterated prisoner's dilemma for {self.model.num_iter} rounds.
 
+Payoffs to you:
+CC -> {payoff_matrix['C','C'][0]}
+DD -> {payoff_matrix['D','D'][0]}
+DC -> {payoff_matrix['D','C'][0]}
+CD -> {payoff_matrix['C','D'][0]}
+
+History against this opponent:
 {self.serialize_history(self.history, other.unique_id)}
 
-There are {self.model.num_iter - self.model.steps + 1} turns left in the game, including the one you are making a decision about now.
+Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
 
-You should act in a way that will maximize your total winnings over the complete course of the game. You are indifferent to whether or not your opponent wins anything. If your opponent wins a lot during the game, or a little, or none at all, it is all the same to you.
-
-What do you choose? You must choose either C or D for this turn.
-
-Your answer must be in two comma-separated parts. The first part must be the single letter C or D. Then, after a comma, you should give a short rationale for why you made this move.
-
-Example of a correct response:
-C, Since my opponent has chosen C the past few rounds, I'll assume they will continue to do so, and choose C now.
-
-Example of an incorrect response:
-Since my opponent has chosen C the past few rounds, I'll assume they will continue to do so, and choose C now.
-
-What is your response?
+Choose the action that maximizes your total payoff over the entire game.
 """
+
+        if give_rationale:
+            prompt += """
+Reply in exactly this format:
+C, short reason
+or
+D, short reason
+"""
+            num_predict = 128
+        else:
+            prompt += "Reply with exactly one character: C, or D."
+            num_predict = 4
+
+        prompt += "Your move: "
+
         r = requests.post("http://localhost:11434/api/generate",
             json={
                 "model": self.model.ollama_model,
                 "prompt": prompt,
                   "options": {
                     "seed": 123,
-                    "num_ctx": 2048,
+                    "num_ctx": 1024,
+                    "num_predict": num_predict,
                   },
                 "stream": False
             }
         )
         resp = r.json()['response']
-        decision, rationale = resp.split(",",1)
+
+        if give_rationale:
+            decision, rationale = resp.split(",",1)
+        else:
+            decision = resp[0].upper()
+            rationale = None
         with open(self.model.llm_out_file, "a", encoding="utf-8") as f:
             print(
                 "---------------------------------------------------\n" +
                 self.serialize_history(self.history, other.unique_id),
                 file=f,
             )
-            print(f"DECISION: {decision}. RATIONALE: {rationale}", file=f)
+            print(f"DECISION: {decision}. RATIONALE:{rationale}", file=f)
+
         return decision, rationale
 
     def shape(self) -> str:

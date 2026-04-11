@@ -31,6 +31,7 @@ class IPDModel(Model):
         p_diff: float,
         num_iter: int,
         agent_factory: AgentFactory,
+        give_rationales: bool,
         llm_backend: LLMBackend,
         ollama_model: str,
         llm_out_file: str,
@@ -43,6 +44,7 @@ class IPDModel(Model):
         self.seed = seed
         self.payoff_matrix = payoff_matrix
         self.num_iter = num_iter
+        self.give_rationales = give_rationales
         self.llm_backend = llm_backend
         self.ollama_model = ollama_model
         self.llm_out_file = llm_out_file
@@ -206,10 +208,12 @@ class IPDModel(Model):
         rule_agents = [a for a in self.agents if not isinstance(a, LLMAgent)]
         for ra in rule_agents:
             for n in self.network.G.neighbors(ra.node):
-                ra.current_decisions[n], _ = ra.decide_against(
+                output = ra.decide_against(
                     self.node_to_agent[n],
                     self.payoff_matrix,
+                    give_rationale=self.give_rationales
                 )
+                ra.current_decisions[n], _ = output
 
     def _resolve_payoffs(self) -> None:
         """
@@ -220,6 +224,7 @@ class IPDModel(Model):
         processed = set()
 
         for a in self.agents:
+            print(f"a is a {type(a)}")
             i = a.node
 
             for j in self.network.G.neighbors(i):
@@ -228,6 +233,7 @@ class IPDModel(Model):
                     continue
 
                 b = self.node_to_agent[j]
+                print(f"b is a {type(b)}")
 
                 move_i = a.current_decisions[j]
                 move_j = b.current_decisions[i]

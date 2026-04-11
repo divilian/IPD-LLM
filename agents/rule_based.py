@@ -16,9 +16,15 @@ class SuckerAgent(IPDAgent):
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        give_rationale: bool,
     ) -> tuple[str, str]:
-        log = f"I'm node {self.node} (Sucker), interacting with {other.node}. "
-        log += "(C'ing as always.)"
+        if give_rationale:
+            log = (
+                f"I'm node {self.node} (Sucker), interacting with "
+                "{other.node}. (C'ing as always.)"
+            )
+        else:
+            log = ""
         return "C", log
 
     def shape(self) -> str:
@@ -36,10 +42,16 @@ class RandomAgent(IPDAgent):
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        give_rationale: bool,
     ) -> tuple[str, str]:
         move = self.model.random.choice(['C','D'])
-        log = f"I'm node {self.node} (Random), interacting with {other.node}. "
-        log += f"Choosing to {move} this time."
+        if give_rationale:
+            log = (
+                f"I'm node {self.node} (Random), interacting with "
+                "{other.node}. Choosing to {move} this time."
+            )
+        else:
+            log = ""
         return move, log
 
     def shape(self) -> str:
@@ -57,9 +69,15 @@ class MeanAgent(IPDAgent):
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        give_rationale: bool,
     ) -> tuple[str, str]:
-        log = f"I'm node {self.node} (Mean), interacting with {other.node}. "
-        log += "(D'ing as always.)"
+        if give_rationale:
+            log = (
+                f"I'm node {self.node} (Mean), interacting with "
+                "{other.node}. (D'ing as always.)"
+            )
+        else:
+            log = ""
         return "D", log
 
     def shape(self) -> str:
@@ -106,10 +124,21 @@ class TitForTatAgent(IPDAgent):
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        give_rationale: bool,
     ) -> tuple[str, str]:
         prelude = f"I'm node {self.node} (TFT), interacting with {other.node}. "
         h = self.history[other.node]
-        return tft_algorithm(h, other.node, prelude, self.random, self.noise)
+        output = tft_algorithm(
+            h,
+            other.node,
+            prelude,
+            self.random,
+            self.noise,
+        )
+        if give_rationale:
+            return output
+        else:
+            return output[0], ""
 
     def shape(self) -> str:
         return "s"   # Square = "rule-based/fair/predictable"
@@ -142,19 +171,23 @@ class BrowserAgent(IPDAgent):
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        give_rationale: bool,
     ) -> tuple[str, str]:
         prelude = (
             f"I'm node {self.node} (Browser), interacting with {other.node}. "
         )
         h = self.history[other.node]
-        return tft_algorithm(
+        output = tft_algorithm(
             h,
             other.node,
             prelude,
             self.random,
             self.tft_noise,
         )
-        return h[-1]["other_action"], log
+        if give_rationale:
+            return output
+        else:
+            return output[0], ""
         
     def is_adjacent_to_node(self, x):
         return any(

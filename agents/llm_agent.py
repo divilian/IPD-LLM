@@ -25,6 +25,7 @@ class LLMAgent(IPDAgent):
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        give_rationale: bool,
     ) -> tuple[str, str]:
 
         decision = self.decisions[other.cell.coordinate]
