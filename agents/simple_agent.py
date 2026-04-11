@@ -45,45 +45,23 @@ Choose the action that maximizes your total payoff over the entire game.
 
         if self.rewiring_aware:
             prompt += (
-                "\nAfter this round, you may have the opportunity to sever "
-                "connections with current opponents and have them replaced with "
-                "new opponents drawn from your friends-of-friends.\n"
+                "\nAfter this round, you will have the opportunity to sever "
+                "connections with current opponents and have them replaced "
+                "with new opponents drawn from your friends-of-friends.\n"
             )
 
         if give_rationale:
-            prompt += """
-Reply in exactly this format:
-C, short reason
-or
-D, short reason
-"""
+            prompt += 'Reply with exactly this JSON, corresponding to your move choice: {"move": "C", "reason": "short explanation"} or {"move": "D", "reason": "short explanation"}'
             num_predict = 128
         else:
-            prompt += "Reply with exactly one character: C, or D."
-            num_predict = 4
+            prompt += 'Reply with exactly this JSON, corresponding to your move choice: {"move": "C"} or {"move": "D"}'
+            num_predict = 16
 
         prompt += "Your move: "
 
-        r = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": self.model.ollama_model,
-                "prompt": prompt,
-                "options": {
-                    "seed": 123,
-                    "num_ctx": 1024,
-                    "num_predict": num_predict,
-                },
-                "stream": False,
-            },
-        )
-        resp = r.json()["response"]
-
-        if give_rationale:
-            decision, rationale = resp.split(",", 1)
-        else:
-            decision = resp[0].upper()
-            rationale = None
+        resp = self._call_ollama_json(prompt, num_predict)
+        decision = resp["move"].strip().upper()
+        rationale = resp["reason"] if give_rationale else "(none)"
 
         with open(self.model.llm_out_file, "a", encoding="utf-8") as f:
             print(
@@ -93,9 +71,24 @@ D, short reason
             )
             print(f"DECISION: {decision}. RATIONALE:{rationale}", file=f)
 
-        decision = decision.strip().upper()
-        rationale = rationale.strip() if rationale else rationale
         return decision, rationale
+
+    def _call_ollama(self, prompt: str, num_predict: int) -> str:
+        r = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": self.model.ollama_model,
+                "prompt": prompt,
+                "options": {
+                    "seed": 123,
+                    "num_ctx": 2048,
+                    "num_predict": num_predict,
+                },
+                "stream": False,
+            },
+        )
+        data = r.json()
+        return data["response"]
 
     def shape(self) -> str:
         return "h"   # Hex
@@ -169,21 +162,29 @@ D, short reason
         return summary
 
     def _call_ollama_json(self, prompt: str, num_predict: int = 256):
-        r = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": self.model.ollama_model,
-                "prompt": prompt,
-                "options": {
-                    "seed": 123,
-                    "num_ctx": 2048,
-                    "num_predict": num_predict,
-                },
-                "stream": False,
-            },
-        )
-        resp = r.json()["response"].strip()
-        return json.loads(resp)
+        raw = self._call_ollama(prompt, num_predict).strip()
+
+        # Try direct JSON first.
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: extract the last JSON object in the string.
+        last_open = raw.rfind("{")
+        last_close = raw.rfind("}")
+        if last_open == -1 or last_close == -1 or last_close <= last_open:
+            raise ValueError(f"Could not find JSON object in response: {raw!r}")
+
+        candidate = raw[last_open:last_close + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Failed to parse JSON from response.\n"
+                f"Raw: {raw!r}\n"
+                f"Candidate: {candidate!r}"
+            ) from e
 
     def ask_llm_rewiring_decisions(self, partner_data, payoff_matrix):
         rewiring_notice = (
