@@ -1,5 +1,16 @@
 # Prisoner's Dilemma agenda
 
+## SCC paper related
+
+- [ ] Spin up a GC instance to run at scale
+- [ ] Enable LLMs to rewire their local graph and to request information from
+  peers
+- [ ] Calculate action metrics (C vs D's; total $ earned; number of rewires;
+  etc) based on agent type
+- [ ] Experiment with a small number of different prompts
+- [ ] Store animation frames for fast replay
+
+
 ## Performance
 
 - [ ] _If_ it turns out to be empirically slow, consider asychronous agents
