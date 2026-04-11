@@ -32,7 +32,7 @@ from analysis.stats import (
     print_stats,
     print_agent_type_adjacency_matrix,
 )
-from analysis.plotting import setup_plotting, plot
+from analysis.plotting import setup_plotting, plot, finalize_plotting
 
 
 def parse_args():
@@ -177,6 +177,11 @@ def parse_args():
         help="Plot animation",
     )
     parser.add_argument(
+        "--plot-interactive",
+        action="store_true",
+        help="Show plot live instead of writing plot.mp4",
+    )
+    parser.add_argument(
         "--analyze",
         action="store_true",
         help="Launch interactive node analyzer",
@@ -316,13 +321,20 @@ if __name__ == "__main__":
     print_agent_type_adjacency_matrix(m.network)
 
     if args.plot:
-        plot_context = setup_plotting(m)
+        plot_context = setup_plotting(m, interactive=args.plot_interactive)
 
     for t in tqdm(range(args.num_iter)):
         m.step()
         monies = [m.node_to_agent[n].wealth for n in m.network.G.nodes]
         if args.plot:
-            plot(m, plot_context, monies, t, args.num_iter)
+            plot(
+                m,
+                plot_context,
+                monies,
+                t,
+                args.num_iter,
+                interactive=args.plot_interactive,
+            )
         row = {"step": t + 1}
         row.update(per_agent_type_stats(m))
         stats.append(row)
@@ -333,8 +345,11 @@ if __name__ == "__main__":
     stats = pd.DataFrame(stats)
     print_stats(stats)
 
+    if args.plot:
+        if args.plot_interactive:
+            plt.show()
+        else:
+            finalize_plotting(plot_context, output_file="animation.mp4")
+
     if args.analyze:
         interact_with_model(m)
-
-    if args.plot:
-        plt.show()
