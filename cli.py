@@ -127,6 +127,17 @@ def parse_args():
         help="Tit-for-tat noise rate for some agent types (def: 0.1)",
     )
     parser.add_argument(
+        "--llm-rewiring-aware",
+        action="store_true",
+        help="LLMs make rewiring decisions? (def: false)",
+    )
+    parser.add_argument(
+        "--llm-relationship-data-mode",
+        choices=["summary", "full"],
+        help="The granularity of data that LLM agents get (def: summary)",
+        default="summary",
+    )
+    parser.add_argument(
         "--llm-out-file",
         type=str,
         default="llm.out",
