@@ -224,7 +224,6 @@ class IPDModel(Model):
         processed = set()
 
         for a in self.agents:
-            print(f"a is a {type(a)}")
             i = a.node
 
             for j in self.network.G.neighbors(i):
@@ -233,7 +232,6 @@ class IPDModel(Model):
                     continue
 
                 b = self.node_to_agent[j]
-                print(f"b is a {type(b)}")
 
                 move_i = a.current_decisions[j]
                 move_j = b.current_decisions[i]
