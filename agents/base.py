@@ -81,6 +81,43 @@ class IPDAgent(CellAgent):
         """
         pass
 
+    def _foaf_candidates(self):
+        reports = [
+            c.agents[0].inform_foaf(self) for c in self.cell.neighborhood.cells
+        ]
+        foafs = {
+            foaf_node
+            for fr in reports
+            if fr is not None
+            for foaf_node in fr
+        }
+        foafs -= {self.node}
+        return foafs
+
+    def _apply_rewiring(self, drop_nodes, candidate_nodes):
+        for node in drop_nodes:
+            self.model.network.remove_connection(
+                self.cell,
+                self.model.node_to_agent[node].cell,
+            )
+
+        num_needed = len(drop_nodes)
+        available = set(candidate_nodes)
+
+        for _ in range(num_needed):
+            available = {
+                n for n in available
+                if n != self.node and not self.is_adjacent_to_node(n)
+            }
+            if not available:
+                return
+            new_node = self.model.random.choice(list(available))
+            self.model.network.add_connection(
+                self.cell,
+                self.model.node_to_agent[new_node].cell,
+            )
+            available.remove(new_node)
+
     def inform_foaf(
         self,
         inquirer: "IPDAgent",
@@ -95,6 +132,59 @@ class IPDAgent(CellAgent):
         the hand.
         """
         return self.history
+
+    def _get_current_neighbors(self) -> set[int]:
+        return {
+            node
+            for node in self.history
+            if self.is_adjacent_to_node(node)
+        }
+
+    def _get_foaf_nodes(self) -> set[int]:
+        foaf_reports = [
+            c.agents[0].inform_foaf(self) for c in self.cell.neighborhood.cells
+        ]
+        foafs = {
+            foaf_node
+            for fr in foaf_reports
+            if fr is not None
+            for foaf_node in fr
+        }
+        foafs -= {self.node}
+        return foafs
+
+
+    def _get_eligible_rewiring_candidates(
+        self,
+        candidate_nodes: set[int],
+        starting_neighbors: set[int],
+        severed_nodes: set[int],
+    ) -> set[int]:
+        """
+        Return the subset of candidate rewiring targets that are valid for
+        immediate replacement.
+        """
+        # Remove from consideration:
+        # - myself,
+        # - anyone who was already my neighbor when this rewiring step began, and
+        # - anyone I just severed.
+        #
+        # Note that `severed_nodes` is logically redundant with
+        # `starting_neighbors`, but I am leaving it explicit here because it makes
+        # the intent clearer: someone I just dumped should not be eligible as an
+        # immediate replacement.
+        eligible_nodes = set(candidate_nodes)
+        eligible_nodes -= {self.node}
+        eligible_nodes -= starting_neighbors
+        eligible_nodes -= severed_nodes
+
+        # As an extra safety check, only consider nodes who are not currently
+        # adjacent to me. This prevents accidental duplicate connections even
+        # if the FOAF set is stale or overinclusive.
+        return {
+            node for node in eligible_nodes
+            if not self.is_adjacent_to_node(node)
+        }
 
     def shape(self) -> str:
         """

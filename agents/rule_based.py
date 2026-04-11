@@ -203,21 +203,21 @@ class BrowserAgent(IPDAgent):
         if self.model.debug:
             print(f"***************************************\n"
                 f"{self.unique_id} (node {self.node}) is considering rewiring")
-        my_foaf_reports = [
-            c.agents[0].inform_foaf(self) for c in self.cell.neighborhood.cells
-        ]
-        my_foafs = {
-            foaf_node
-            for fr in my_foaf_reports
-            if fr is not None
-            for foaf_node in fr
-        }
-        my_foafs -= {self.node}
+
+        my_foafs = self._get_foaf_nodes()
+
+        # Keep track of who my neighbors are at the start of rewiring.
+        # We will exclude all of them from replacement candidates, so that if I
+        # sever a connection with someone during this rewiring step, I do not
+        # immediately reconnect to that same node.
+        starting_neighbors = self._get_current_neighbors()
 
         # Keep track of how many connections I've severed, so that I know how
         # many new connections to make when I'm done severing. (So as to
         # preserve this node's degree to the extent possible.)
         self.num_needed_replacements = 0
+        severed_nodes = set()
+
         for node, history in self.history.items():
             if (
                 # Even if we've previously severed connections with this agent,
@@ -229,7 +229,6 @@ class BrowserAgent(IPDAgent):
             ):
                 if self.model.debug:
                     print(f"You're dead to me, {node}.")
-                other = self.model.node_to_agent[node]
                 # This should work vvvvv but does not. See discussion #3694.
                 #self.cell.disconnect(self.model.node_to_agent[node].cell)
                 self.model.network.remove_connection(
@@ -237,6 +236,7 @@ class BrowserAgent(IPDAgent):
                     self.model.node_to_agent[node].cell,
                 )
                 self.num_needed_replacements += 1
+                severed_nodes.add(node)
 
         if self.num_needed_replacements:
             if self.model.debug:
@@ -247,10 +247,17 @@ class BrowserAgent(IPDAgent):
             if self.model.debug:
                 print("Nobody terminated; no need to make more connections.")
             pass
+
+        eligible_foafs = self._get_eligible_rewiring_candidates(
+            my_foafs,
+            starting_neighbors,
+            severed_nodes,
+        )
+
         for _ in range(self.num_needed_replacements):
-            if my_foafs:
+            if eligible_foafs:
                 # In this model, people don't have to approve friend requests.
-                new_friend_node = self.model.random.choice(list(my_foafs))
+                new_friend_node = self.model.random.choice(list(eligible_foafs))
                 # This should work vvvvv but does not. See discussion #3694.
                 #self.cell.connect(self.model.node_to_agent[new_friend_node])
                 self.model.network.add_connection(
