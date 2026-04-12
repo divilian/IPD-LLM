@@ -107,10 +107,10 @@ def tft_algorithm(
         return choice, log
 
     log += (
-        f"\n  Last time node {other_node} {h[-1]['other_action']}'d "
-        + f"against me. So I'm {h[-1]['other_action']}'ing them this time."
+        f"\n  Last time node {other_node} {h[-1]['other_move']}'d "
+        + f"against me. So I'm {h[-1]['other_move']}'ing them this time."
     )
-    return h[-1]["other_action"], log
+    return h[-1]["other_move"], log
 
 @register_agent("TFT")
 class TitForTatAgent(IPDAgent):
@@ -284,14 +284,14 @@ class BrowserAgent(IPDAgent):
             return False
 
         recent = other_history[-self.patience :]
-        answer = all(move["other_action"] == "D" for move in recent)
+        answer = all(move["other_move"] == "D" for move in recent)
         if answer:
             if self.model.debug:
                 print(f"Ditch this guy!")
         else:
             if self.model.debug:
                 print(f"Stay friends with this guy.")
-        return all(move["other_action"] == "D" for move in recent)
+        return all(move["other_move"] == "D" for move in recent)
 
     def shape(self) -> str:
         return "<"   # Triangle sideways = "shopping around"

@@ -33,10 +33,10 @@ class IPDAgent(CellAgent):
         self.cell = cell
         self.current_iter_payment = 0
 
-        # history[other_node] = list of {step, self_action, other_action}
+        # history[other_node] = list of {step, self_move, other_move}
         self.history = defaultdict(list)
 
-        # current_decisions[other_node] = action for THIS step only
+        # current_decisions[other_node] = move for THIS step only
         self.current_decisions = {}
 
         self.wealth = 0.0
@@ -44,14 +44,14 @@ class IPDAgent(CellAgent):
     def record_interaction(
         self,
         other_node: int,
-        self_action: str,
-        other_action: str,
+        self_move: str,
+        other_move: str,
     ) -> None:
         self.history[other_node].append(
             {
                 "step": self.model.steps,
-                "self_action": self_action,
-                "other_action": other_action,
+                "self_move": self_move,
+                "other_move": other_move,
             }
         )
 
@@ -125,7 +125,7 @@ class IPDAgent(CellAgent):
         """
         Return a reported interaction history keyed by opponent node number.
         Each value is a list of dicts with keys 'step' (the round number),
-        'self_action', and 'other_action'.
+        'self_move', and 'other_move'.
 
         Note that it is perfectly permissible to lie about this history, if you
         deem that advantageous. You can also return None to give the inquirer

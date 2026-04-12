@@ -40,8 +40,7 @@ History against this opponent:
 
 Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
 
-Choose the action that maximizes your total payoff over the entire game.
-"""
+    Choose the move that maximizes your total payoff over the entire game."""
 
         if self.rewiring_aware:
             prompt += (
@@ -108,23 +107,23 @@ Choose the action that maximizes your total payoff over the entire game.
         rounds_played = len(history)
         recent = history[-recent_k:]
         recent_pairs = [
-            [m["self_action"], m["other_action"]]
+            [m["self_move"], m["other_move"]]
             for m in recent
         ]
-        other_defections = sum(m["other_action"] == "D" for m in history)
-        other_cooperations = sum(m["other_action"] == "C" for m in history)
+        other_defections = sum(m["other_move"] == "D" for m in history)
+        other_cooperations = sum(m["other_move"] == "C" for m in history)
         mutual_c = sum(
-            m["self_action"] == "C" and m["other_action"] == "C"
+            m["self_move"] == "C" and m["other_move"] == "C"
             for m in history
         )
         mutual_d = sum(
-            m["self_action"] == "D" and m["other_action"] == "D"
+            m["self_move"] == "D" and m["other_move"] == "D"
             for m in history
         )
 
         trailing_d = 0
         for m in reversed(history):
-            if m["other_action"] == "D":
+            if m["other_move"] == "D":
                 trailing_d += 1
             else:
                 break
@@ -150,8 +149,8 @@ Choose the action that maximizes your total payoff over the entire game.
                 "history": [
                     {
                         "step": move["step"],
-                        "self_action": move["self_action"],
-                        "other_action": move["other_action"],
+                        "self_move": move["self_move"],
+                        "other_move": move["other_move"],
                     }
                     for move in history
                 ],
@@ -313,7 +312,7 @@ Current partners:
         )
         for h in history[opponent_node]:
             prompt += (
-                f"On turn {h['step']}, you chose {h['self_action']} and "
-                f"your opponent chose {h['other_action']}.\n"
+                f"On turn {h['step']}, you chose {h['self_move']} and "
+                f"your opponent chose {h['other_move']}.\n"
             )
         return prompt
