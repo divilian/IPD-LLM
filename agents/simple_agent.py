@@ -1,10 +1,25 @@
 import json
 import requests
+
 from mesa import Model
 from mesa.discrete_space import Cell, CellAgent
 
 from .base import IPDAgent, register_agent
 
+
+MOVE_DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "move": {
+            "enum": ["C", "D"]
+        },
+        "reason": {
+            "type": "string"
+        },
+    },
+    "required": ["move"],
+    "additionalProperties": False
+}
 
 @register_agent("SimpleLLM")
 class SimpleLLMAgent(IPDAgent):
@@ -20,6 +35,7 @@ class SimpleLLMAgent(IPDAgent):
         self.rewiring_aware = rewiring_aware
         self.relationship_data_mode = relationship_data_mode
         self.rewiring_recent_k = rewiring_recent_k
+
 
     def decide_against(
         self,
@@ -50,17 +66,18 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
             )
 
         if give_rationale:
-            prompt += 'Reply with exactly this JSON, corresponding to your move choice: {"move": "C", "reason": "short explanation"} or {"move": "D", "reason": "short explanation"}'
-            num_predict = 128
+            num_predict = 1024
         else:
-            prompt += 'Reply with exactly this JSON, corresponding to your move choice: {"move": "C"} or {"move": "D"}'
             num_predict = 16
 
-        prompt += "Your move: "
+        resp = self._call_ollama_json(
+            prompt,
+            num_predict,
+            schema=MOVE_DECISION_SCHEMA,
+        )
 
-        resp = self._call_ollama_json(prompt, num_predict)
         decision = resp["move"].strip().upper()
-        rationale = resp["reason"] if give_rationale else "(none)"
+        rationale = resp.get("reason", "(none)")
 
         with open(self.model.llm_out_file, "a", encoding="utf-8") as f:
             print(
@@ -68,26 +85,112 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
                 + self.serialize_history(self.history, other.unique_id),
                 file=f,
             )
-            print(f"DECISION: {decision}. RATIONALE:{rationale}", file=f)
+            print(f"DECISION: {decision}. RATIONALE: {rationale}", file=f)
 
         return decision, rationale
 
-    def _call_ollama(self, prompt: str, num_predict: int) -> str:
+
+    def _call_ollama(
+        self,
+        prompt: str,
+        num_predict: int,
+        system: str | None = None,
+        response_format: str | dict | None = None,
+        temperature: float = 0.0,
+    ) -> str:
+        payload = {
+            "model": self.model.ollama_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "seed": 123,
+                "temperature": temperature,
+                "num_ctx": 2048,
+                "num_predict": num_predict,
+            },
+        }
+
+        if system is not None:
+            payload["system"] = system
+
+        if response_format is not None:
+            payload["format"] = response_format
+
         r = requests.post(
             "http://localhost:11434/api/generate",
-            json={
-                "model": self.model.ollama_model,
-                "prompt": prompt,
-                "options": {
-                    "seed": 123,
-                    "num_ctx": 2048,
-                    "num_predict": num_predict,
-                },
-                "stream": False,
-            },
+            json=payload,
+            timeout=120,
         )
+        r.raise_for_status()
+
         data = r.json()
-        return data["response"]
+
+        if "response" not in data:
+            raise RuntimeError(f"Unexpected Ollama response payload: {data}")
+
+        if data.get("done") is False:
+            raise RuntimeError(f"Ollama did not finish generation: {data}")
+
+        done_reason = data.get("done_reason")
+        if done_reason == "length":
+            raise RuntimeError("Ollama output was truncated (done_reason='length'). Increase num_predict.")
+
+        return data["response"].strip()
+
+
+    def _call_ollama_json(
+        self,
+        prompt: str,
+        num_predict: int,
+        *,
+        schema: dict,
+        system: str | None = None,
+    ) -> dict:
+        effective_system = (
+            system
+            or "Return only valid JSON matching the provided schema. "
+               "Do not output any text outside the JSON object."
+        )
+
+        text = self._call_ollama(
+            prompt=prompt,
+            num_predict=num_predict,
+            system=effective_system,
+            response_format=schema,
+            temperature=0.0,
+        )
+
+        try:
+            obj = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Model returned invalid JSON: {text[:500]!r}",
+            ) from e
+
+        if not isinstance(obj, dict):
+            raise ValueError(
+                f"Expected top-level JSON object, got {type(obj).__name__}",
+            )
+
+        return obj
+
+#    def _call_ollama(self, prompt: str, num_predict: int) -> str:
+#        r = requests.post(
+#            "http://localhost:11434/api/generate",
+#            json={
+#                "model": self.model.ollama_model,
+#                "prompt": prompt,
+#                "options": {
+#                    "seed": 123,
+#                    "num_ctx": 2048,
+#                    "num_predict": num_predict,
+#                    "temperature": 0,
+#                },
+#                "stream": False,
+#            },
+#        )
+#        data = r.json()
+#        return data["response"]
 
     def shape(self) -> str:
         return "h"   # Hex
@@ -142,6 +245,7 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
             "mutual_defection_count": mutual_d,
         }
 
+
     def _serialize_partner_for_rewiring(self, node: int, history):
         if self.relationship_data_mode == "raw":
             return {
@@ -160,20 +264,12 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
         summary["node"] = node
         return summary
 
-    def _call_ollama_json(self, prompt: str, num_predict: int = 256):
-        raw = self._call_ollama(prompt, num_predict).strip()
 
-        # Try direct JSON first.
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            pass
 
-        # Fallback: extract the last JSON object in the string.
-        last_open = raw.rfind("{")
-        last_close = raw.rfind("}")
-        if last_open == -1 or last_close == -1 or last_close <= last_open:
-            raise ValueError(f"Could not find JSON object in response: {raw!r}")
+        if not current_neighbor_lines:
+            current_neighbor_text = "(none)"
+        else:
+            current_neighbor_text = "\n".join(current_neighbor_lines)
 
         candidate = raw[last_open:last_close + 1]
         try:
@@ -185,14 +281,9 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
                 f"Candidate: {candidate!r}"
             ) from e
 
-    def ask_llm_rewiring_decisions(self, partner_data, payoff_matrix):
-        rewiring_notice = (
-            "After each round, you may choose for each current partner whether to KEEP or DROP that connection. "
-            "If you DROP a current partner, that relationship ends, and the environment will try to replace it "
-            "with a new random opponent chosen from your friends-of-friends if one is available."
-            if self.rewiring_aware else
-            ""
-        )
+            candidate_lines.append(
+                f"- id={agent.unique_id}, mutual_contacts={mutual_ids}"
+            )
 
         partner_label = (
             "summaries of your relationships with current partners"
