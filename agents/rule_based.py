@@ -189,88 +189,25 @@ class BrowserAgent(IPDAgent):
         else:
             return output[0], ""
         
-    def is_adjacent_to_node(self, x):
-        return any(
-            (cell.coordinate == x for cell in self.cell.neighborhood.cells)
-        )
-
-    def rewire_as_desired(
+    def choose_neighbors_to_sever(
         self,
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]]):
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        starting_neighbors: set[int],
+        my_foafs: set[int],
+    ) -> list[int]:
         """
-        Anyone who has defected a lot recently gets the axe.
+        BrowserAgent policy: anyone who's defected a lot recently gets the axe.
         """
-        if self.model.debug:
-            print(f"***************************************\n"
-                f"{self.unique_id} (node {self.node}) is considering rewiring")
-
-        my_foafs = self._get_foaf_nodes()
-
-        # Keep track of who my neighbors are at the start of rewiring.
-        # We will exclude all of them from replacement candidates, so that if I
-        # sever a connection with someone during this rewiring step, I do not
-        # immediately reconnect to that same node.
-        starting_neighbors = self._get_current_neighbors()
-
-        # Keep track of how many connections I've severed, so that I know how
-        # many new connections to make when I'm done severing. (So as to
-        # preserve this node's degree to the extent possible.)
-        self.num_needed_replacements = 0
-        severed_nodes = set()
+        sever_targets: list[int] = []
 
         for node, history in self.history.items():
             if (
-                # Even if we've previously severed connections with this agent,
-                # we still have its history from before our breakup. So we need
-                # to check whether the node we think we want to ditch is
-                # actually still a neighbor!
-                self.is_adjacent_to_node(node) and
-                self._has_defected_too_often(history)
+                node in starting_neighbors
+                and self._has_defected_too_often(history)
             ):
-                if self.model.debug:
-                    print(f"You're dead to me, {node}.")
-                # This should work vvvvv but does not. See discussion #3694.
-                #self.cell.disconnect(self.model.node_to_agent[node].cell)
-                self.model.network.remove_connection(
-                    self.cell,
-                    self.model.node_to_agent[node].cell,
-                )
-                self.num_needed_replacements += 1
-                severed_nodes.add(node)
+                sever_targets.append(node)
 
-        if self.num_needed_replacements:
-            if self.model.debug:
-                print(f"I've terminated {self.num_needed_replacements} "
-                    "connections, and will now try to make that many more.")
-            pass
-        else:
-            if self.model.debug:
-                print("Nobody terminated; no need to make more connections.")
-            pass
-
-        eligible_foafs = self._get_eligible_rewiring_candidates(
-            my_foafs,
-            starting_neighbors,
-            severed_nodes,
-        )
-
-        for _ in range(self.num_needed_replacements):
-            if eligible_foafs:
-                # In this model, people don't have to approve friend requests.
-                new_friend_node = self.model.random.choice(list(eligible_foafs))
-                # This should work vvvvv but does not. See discussion #3694.
-                #self.cell.connect(self.model.node_to_agent[new_friend_node])
-                self.model.network.add_connection(
-                    self.cell,
-                    self.model.node_to_agent[new_friend_node].cell,
-                )
-                my_foafs -= {new_friend_node}
-                if self.model.debug:
-                    print(f"I'm now friends with {new_friend_node}!")
-            else:
-                if self.model.debug:
-                    print(f"Yikes! Nobody to replace severed connection with.")
-                return
+        return sever_targets
 
     def _has_defected_too_often(self, other_history):
         """
@@ -292,6 +229,24 @@ class BrowserAgent(IPDAgent):
             if self.model.debug:
                 print(f"Stay friends with this guy.")
         return all(move["other_move"] == "D" for move in recent)
+
+    def choose_new_neighbors(
+        self,
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        eligible_foafs: set[int],
+        num_needed_replacements: int,
+        severed_nodes: set[int],
+        starting_neighbors: set[int],
+    ) -> list[int]:
+        """
+        BrowserAgent policy: pick random eligible FOAFs as replacements.
+        """
+        if not eligible_foafs or num_needed_replacements <= 0:
+            return []
+
+        candidates = list(eligible_foafs)
+        self.model.random.shuffle(candidates)
+        return candidates[:num_needed_replacements]
 
     def shape(self) -> str:
         return "<"   # Triangle sideways = "shopping around"

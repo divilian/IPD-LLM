@@ -7,7 +7,7 @@ from mesa.discrete_space import Cell, CellAgent
 from .base import IPDAgent, register_agent
 
 
-MOVE_DECISION_SCHEMA = {
+MOVE_PLUS_RATIONALE_DECISION_SCHEMA = {
     "type": "object",
     "properties": {
         "move": {
@@ -17,7 +17,37 @@ MOVE_DECISION_SCHEMA = {
             "type": "string"
         },
     },
+    "required": ["move", "reason"],
+    "additionalProperties": False
+}
+
+MOVE_ONLY_DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "move": {
+            "enum": ["C", "D"]
+        },
+    },
     "required": ["move"],
+    "additionalProperties": False
+}
+
+REWIRING_DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "drop_ids": {
+            "type": "array",
+            "items": {"type": "string"}
+        },
+        "add_ids": {
+            "type": "array",
+            "items": {"type": "string"}
+        },
+        "reason": {
+            "type": "string"
+        }
+    },
+    "required": ["drop_ids", "add_ids"],
     "additionalProperties": False
 }
 
@@ -56,7 +86,7 @@ History against this opponent:
 
 Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
 
-    Choose the move that maximizes your total payoff over the entire game."""
+Choose the move that maximizes your total payoff over the entire game."""
 
         if self.rewiring_aware:
             prompt += (
@@ -66,14 +96,16 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
             )
 
         if give_rationale:
-            num_predict = 1024
+            num_predict = 256
+            schema = MOVE_PLUS_RATIONALE_DECISION_SCHEMA
         else:
             num_predict = 16
+            schema = MOVE_ONLY_DECISION_SCHEMA
 
         resp = self._call_ollama_json(
             prompt,
             num_predict,
-            schema=MOVE_DECISION_SCHEMA,
+            schema=schema,
         )
 
         decision = resp["move"].strip().upper()
@@ -133,6 +165,7 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
 
         done_reason = data.get("done_reason")
         if done_reason == "length":
+            import ipdb ; ipdb.set_trace()
             raise RuntimeError("Ollama output was truncated (done_reason='length'). Increase num_predict.")
 
         return data["response"].strip()
@@ -198,11 +231,6 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
     def size(self) -> str:
         return 2000
 
-    def is_adjacent_to_node(self, x):
-        return any(
-            (cell.coordinate == x for cell in self.cell.neighborhood.cells)
-        )
-
     def summarize_relationship(self, history, recent_k=None):
         if recent_k is None:
             recent_k = self.rewiring_recent_k
@@ -265,57 +293,100 @@ Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
         return summary
 
 
+    def ask_llm_rewiring_decisions(
+        self,
+        current_neighbors: list["IPDAgent"],
+        candidate_new_neighbors: list["IPDAgent"],
+        max_drops: int,
+        max_adds: int,
+        give_rationale: bool,
+    ) -> tuple[list[str], list[str], str]:
+        current_neighbor_lines = []
+        for agent in current_neighbors:
+            hist = self.serialize_history(self.history, agent.unique_id)
+            current_neighbor_lines.append(
+                f"- id={agent.unique_id}\n{hist}"
+            )
 
         if not current_neighbor_lines:
             current_neighbor_text = "(none)"
         else:
             current_neighbor_text = "\n".join(current_neighbor_lines)
 
-        candidate = raw[last_open:last_close + 1]
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Failed to parse JSON from response.\n"
-                f"Raw: {raw!r}\n"
-                f"Candidate: {candidate!r}"
-            ) from e
+        candidate_lines = []
+        for agent in candidate_new_neighbors:
+            mutuals = sorted(
+                set(self.graph.neighbors(self)) & set(self.graph.neighbors(agent))
+            ) if hasattr(self, "graph") else []
+            mutual_ids = [a.unique_id if hasattr(a, "unique_id") else str(a) for a in mutuals]
 
             candidate_lines.append(
                 f"- id={agent.unique_id}, mutual_contacts={mutual_ids}"
             )
 
-        partner_label = (
-            "summaries of your relationships with current partners"
-            if self.relationship_data_mode == "summary"
-            else "full raw histories of your relationships with current partners"
+        if not candidate_lines:
+            candidate_text = "(none)"
+        else:
+            candidate_text = "\n".join(candidate_lines)
+
+        prompt = f"""You are deciding how to rewire your social network in a networked iterated prisoner's dilemma.
+
+    You may drop up to {max_drops} current neighbors and add up to {max_adds} new neighbors.
+
+    Your goal is to maximize your future total payoff.
+
+    Current neighbors and your history against each:
+    {current_neighbor_text}
+
+    Available candidate new neighbors:
+    {candidate_text}
+    """
+
+        if give_rationale:
+            prompt += "\nInclude a brief reason."
+        else:
+            prompt += "\nDo not include a reason."
+
+        resp = self._call_ollama_json(
+            prompt=prompt,
+            num_predict=192 if give_rationale else 96,
+            schema=REWIRING_DECISION_SCHEMA,
         )
 
-        prompt = f"""You are playing an iterated prisoner's dilemma for {self.model.num_iter} rounds.
+        drop_ids = resp["drop_ids"]
+        add_ids = resp["add_ids"]
+        reason = resp.get("reason", "(none)")
 
-Payoffs to you:
-CC -> {payoff_matrix['C','C'][0]}
-DD -> {payoff_matrix['D','D'][0]}
-DC -> {payoff_matrix['D','C'][0]}
-CD -> {payoff_matrix['C','D'][0]}
+        if not isinstance(drop_ids, list) or not all(isinstance(x, str) for x in drop_ids):
+            raise ValueError(f"Invalid drop_ids returned by LLM: {drop_ids!r}")
 
-Your objective is to maximize your own total payoff over the entire game.
-{rewiring_notice}
+        if not isinstance(add_ids, list) or not all(isinstance(x, str) for x in add_ids):
+            raise ValueError(f"Invalid add_ids returned by LLM: {add_ids!r}")
 
-Below are {partner_label}.
-Return JSON only in exactly this form:
-{{"decisions": [{{"node": 1, "action": "KEEP"}}, {{"node": 2, "action": "DROP"}}]}}
+        allowed_drop_ids = {agent.unique_id for agent in current_neighbors}
+        allowed_add_ids = {agent.unique_id for agent in candidate_new_neighbors}
 
-Current partners:
-{json.dumps(partner_data, indent=2)}
-"""
-        raw = self._call_ollama_json(prompt)
-        return raw["decisions"]
+        drop_ids = [x for x in drop_ids if x in allowed_drop_ids]
+        add_ids = [x for x in add_ids if x in allowed_add_ids]
+
+        drop_ids = list(dict.fromkeys(drop_ids))[:max_drops]
+        add_ids = list(dict.fromkeys(add_ids))[:max_adds]
+
+        with open(self.model.llm_out_file, "a", encoding="utf-8") as f:
+            print("---------------------------------------------------", file=f)
+            print("REWIRING DECISION", file=f)
+            print(f"DROP: {drop_ids}", file=f)
+            print(f"ADD: {add_ids}", file=f)
+            print(f"RATIONALE: {reason}", file=f)
+
+        return drop_ids, add_ids, reason
+
 
     def rewire_as_desired(
         self,
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
     ):
+        return
         if self.model.debug:
             print(f"***************************************\n"
                 f"{self.unique_id} (node {self.node}) is considering rewiring")
