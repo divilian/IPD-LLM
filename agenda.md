@@ -61,6 +61,8 @@ Now I can _measure_ how much I'm "steering" towards a particular strategy.
 
 ## Diagnostics
 
+- [ ] Change analyze mode to show all history with any opponent you were _ever_
+  connected to, not just who you're connected to at game end
 - [x] Add agent query mode, where you can interactively type a node number and
   get its number and types of neighbors
 - [ ] Analyze on a per-dyad basis
