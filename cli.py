@@ -127,6 +127,15 @@ def parse_args():
         help="Tit-for-tat noise rate for some agent types (def: 0.1)",
     )
     parser.add_argument(
+        "--max-rewires",
+        type=int,
+        default=3,
+        help=(
+            "Number of disconnect/connect operations agents are allowed each "
+            "round (def: 3)"
+        ),
+    )
+    parser.add_argument(
         "--llm-rewiring-aware",
         action="store_true",
         help="LLMs make rewiring decisions? (def: false)",
@@ -138,15 +147,15 @@ def parse_args():
         default="summary",
     )
     parser.add_argument(
+        "--give-rationales",
+        action="store_true",
+        help="Include rationales narrating moves in log files? (def: false)",
+    )
+    parser.add_argument(
         "--llm-out-file",
         type=str,
         default="llm.out",
         help="Name of file (or None) to store LLM output (def: llm.out)",
-    )
-    parser.add_argument(
-        "--give-rationales",
-        action="store_true",
-        help="Include rationales narrating moves in log files? (def: false)",
     )
     parser.add_argument(
         "--llm-out-file-clobber",
@@ -309,6 +318,7 @@ if __name__ == "__main__":
         p_diff=args.p_diff,
         num_iter=args.num_iter,
         agent_factory=factory,
+        max_rewires=args.max_rewires,
         give_rationales=args.give_rationales,
         llm_out_file=args.llm_out_file,
         ollama_model=args.ollama_model,

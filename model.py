@@ -31,6 +31,7 @@ class IPDModel(Model):
         p_diff: float,
         num_iter: int,
         agent_factory: AgentFactory,
+        max_rewires: int,
         give_rationales: bool,
         llm_backend: LLMBackend,
         ollama_model: str,
@@ -44,6 +45,7 @@ class IPDModel(Model):
         self.seed = seed
         self.payoff_matrix = payoff_matrix
         self.num_iter = num_iter
+        self.max_rewires = max_rewires
         self.give_rationales = give_rationales
         self.llm_backend = llm_backend
         self.ollama_model = ollama_model

@@ -65,6 +65,7 @@ class SimpleLLMAgent(IPDAgent):
         self.rewiring_aware = rewiring_aware
         self.relationship_data_mode = relationship_data_mode
         self.rewiring_recent_k = rewiring_recent_k
+        self._pending_rewiring_plan = None
 
 
     def decide_against(
@@ -165,7 +166,6 @@ Choose the move that maximizes your total payoff over the entire game."""
 
         done_reason = data.get("done_reason")
         if done_reason == "length":
-            import ipdb ; ipdb.set_trace()
             raise RuntimeError("Ollama output was truncated (done_reason='length'). Increase num_predict.")
 
         return data["response"].strip()
@@ -293,45 +293,44 @@ Choose the move that maximizes your total payoff over the entire game."""
         return summary
 
 
-    def ask_llm_rewiring_decisions(
+    def _plan_rewiring_once(
         self,
-        current_neighbors: list["IPDAgent"],
-        candidate_new_neighbors: list["IPDAgent"],
-        max_drops: int,
-        max_adds: int,
-        give_rationale: bool,
-    ) -> tuple[list[str], list[str], str]:
+        starting_neighbors: set[int],
+        new_neighbor_candidates: set[int],
+        max_rewires: int,
+        give_rationale: bool = False,
+    ) -> dict:
         current_neighbor_lines = []
-        for agent in current_neighbors:
-            hist = self.serialize_history(self.history, agent.unique_id)
+        for node in sorted(starting_neighbors):
+            hist = self.serialize_history(self.history, node + 1)
             current_neighbor_lines.append(
-                f"- id={agent.unique_id}\n{hist}"
+                f"- node={node}\n{hist}"
             )
 
-        if not current_neighbor_lines:
-            current_neighbor_text = "(none)"
-        else:
-            current_neighbor_text = "\n".join(current_neighbor_lines)
+        current_neighbor_text = (
+            "\n".join(current_neighbor_lines)
+            if current_neighbor_lines else
+            "(none)"
+        )
 
         candidate_lines = []
-        for agent in candidate_new_neighbors:
-            mutuals = sorted(
-                set(self.graph.neighbors(self)) & set(self.graph.neighbors(agent))
-            ) if hasattr(self, "graph") else []
-            mutual_ids = [a.unique_id if hasattr(a, "unique_id") else str(a) for a in mutuals]
-
+        for node in sorted(new_neighbor_candidates):
+            mutual_contacts = sorted(
+                starting_neighbors & self._get_neighbors_of_node(node)
+            )
             candidate_lines.append(
-                f"- id={agent.unique_id}, mutual_contacts={mutual_ids}"
+                f"- node={node}, mutual_contacts={mutual_contacts}"
             )
 
-        if not candidate_lines:
-            candidate_text = "(none)"
-        else:
-            candidate_text = "\n".join(candidate_lines)
+        candidate_text = (
+            "\n".join(candidate_lines)
+            if candidate_lines else
+            "(none)"
+        )
 
         prompt = f"""You are deciding how to rewire your social network in a networked iterated prisoner's dilemma.
 
-    You may drop up to {max_drops} current neighbors and add up to {max_adds} new neighbors.
+    You may sever up to {max_rewires} current neighbors and add up to {max_rewires} new neighbors.
 
     Your goal is to maximize your future total payoff.
 
@@ -353,8 +352,8 @@ Choose the move that maximizes your total payoff over the entire game."""
             schema=REWIRING_DECISION_SCHEMA,
         )
 
-        drop_ids = resp["drop_ids"]
-        add_ids = resp["add_ids"]
+        drop_ids = resp.get("drop_ids", [])
+        add_ids = resp.get("add_ids", [])
         reason = resp.get("reason", "(none)")
 
         if not isinstance(drop_ids, list) or not all(isinstance(x, str) for x in drop_ids):
@@ -363,102 +362,79 @@ Choose the move that maximizes your total payoff over the entire game."""
         if not isinstance(add_ids, list) or not all(isinstance(x, str) for x in add_ids):
             raise ValueError(f"Invalid add_ids returned by LLM: {add_ids!r}")
 
-        allowed_drop_ids = {agent.unique_id for agent in current_neighbors}
-        allowed_add_ids = {agent.unique_id for agent in candidate_new_neighbors}
+        allowed_drop_ids = {str(node) for node in starting_neighbors}
+        allowed_add_ids = {str(node) for node in new_neighbor_candidates}
 
         drop_ids = [x for x in drop_ids if x in allowed_drop_ids]
         add_ids = [x for x in add_ids if x in allowed_add_ids]
 
-        drop_ids = list(dict.fromkeys(drop_ids))[:max_drops]
-        add_ids = list(dict.fromkeys(add_ids))[:max_adds]
+        drop_ids = list(dict.fromkeys(drop_ids))[:max_rewires]
+        add_ids = list(dict.fromkeys(add_ids))[:max_rewires]
+
+        plan = {
+            "drop_ids": [int(x) for x in drop_ids],
+            "add_ids": [int(x) for x in add_ids],
+            "reason": reason,
+        }
 
         with open(self.model.llm_out_file, "a", encoding="utf-8") as f:
             print("---------------------------------------------------", file=f)
             print("REWIRING DECISION", file=f)
-            print(f"DROP: {drop_ids}", file=f)
-            print(f"ADD: {add_ids}", file=f)
+            print(f"DROP: {plan['drop_ids']}", file=f)
+            print(f"ADD: {plan['add_ids']}", file=f)
             print(f"RATIONALE: {reason}", file=f)
 
-        return drop_ids, add_ids, reason
+        return plan
 
 
-    def rewire_as_desired(
+    def choose_neighbors_to_sever(
         self,
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-    ):
-        return
-        if self.model.debug:
-            print(f"***************************************\n"
-                f"{self.unique_id} (node {self.node}) is considering rewiring")
-
-        my_foafs = self._get_foaf_nodes()
-
-        # Keep track of who my neighbors are at the start of rewiring.
-        # We will exclude all of them from replacement candidates, so that if I
-        # sever a connection with someone during this rewiring step, I do not
-        # immediately reconnect to that same node.
-        starting_neighbors = self._get_current_neighbors()
-
-        partner_data = []
-        for node, history in self.history.items():
-            if self.is_adjacent_to_node(node):
-                partner_data.append(
-                    self._serialize_partner_for_rewiring(node, history)
-                )
-
-        decisions = self.ask_llm_rewiring_decisions(partner_data, payoff_matrix)
-        drop_nodes = {
-            d["node"] for d in decisions
-            if d["action"] == "DROP" and self.is_adjacent_to_node(d["node"])
-        }
-
-        # Keep track of how many connections I've severed, so that I know how
-        # many new connections to make when I'm done severing. (So as to
-        # preserve this node's degree to the extent possible.)
-        self.num_needed_replacements = 0
-        severed_nodes = set()
-
-        for node in drop_nodes:
-            self.model.network.remove_connection(
-                self.cell,
-                self.model.node_to_agent[node].cell,
-            )
-            self.num_needed_replacements += 1
-            severed_nodes.add(node)
-
-        if self.num_needed_replacements:
-            if self.model.debug:
-                print(f"I've terminated {self.num_needed_replacements} "
-                    "connections, and will now try to make that many more.")
-            pass
-        else:
-            if self.model.debug:
-                print("Nobody terminated; no need to make more connections.")
-            pass
-
-        eligible_foafs = self._get_eligible_rewiring_candidates(
-            my_foafs,
-            starting_neighbors,
-            severed_nodes,
+        starting_neighbors: set[int],
+        new_neighbor_candidates: set[int],
+        max_rewires: int,
+    ) -> list[int]:
+        if not self.rewiring_aware:
+            return []
+        self._pending_rewiring_plan = self._plan_rewiring_once(
+            starting_neighbors=starting_neighbors,
+            new_neighbor_candidates=new_neighbor_candidates,
+            max_rewires=max_rewires,
         )
+        return self._pending_rewiring_plan["drop_ids"]
 
-        for _ in range(self.num_needed_replacements):
-            if eligible_foafs:
-                # In this model, people don't have to approve friend requests.
-                new_friend_node = self.model.random.choice(list(eligible_foafs))
-                # This should work vvvvv but does not. See discussion #3694.
-                #self.cell.connect(self.model.node_to_agent[new_friend_node])
-                self.model.network.add_connection(
-                    self.cell,
-                    self.model.node_to_agent[new_friend_node].cell,
-                )
-                eligible_foafs -= {new_friend_node}
-                if self.model.debug:
-                    print(f"I'm now friends with {new_friend_node}!")
-            else:
-                if self.model.debug:
-                    print(f"Yikes! Nobody to replace severed connection with.")
-                return
+
+    def choose_new_neighbors(
+        self,
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        eligible_new_neighbors: set[int],
+        num_needed_replacements: int,
+        severed_nodes: set[int],
+        starting_neighbors: set[int],
+    ) -> list[int]:
+        if not self.rewiring_aware:
+            return []
+        if self._pending_rewiring_plan is None:
+            raise RuntimeError(
+                "choose_new_neighbors() called without a pending rewiring "
+                "plan. Expected choose_neighbors_to_sever() to run first in "
+                "the same rewiring event."
+            )
+
+        try:
+            add_ids = self._pending_rewiring_plan["add_ids"][:num_needed_replacements]
+            allowed_add_ids = set(eligible_new_neighbors)
+            return [node for node in add_ids if node in allowed_add_ids]
+        finally:
+            self._pending_rewiring_plan = None
+
+    def _get_neighbors_of_node(self, node: int) -> set[int]:
+        agent = self.model.node_to_agent[node]
+        return {
+            cell.coordinate
+            for cell in agent.cell.neighborhood.cells
+            if cell.coordinate != node and cell.agents
+        }
 
     def serialize_history(self, history, oid):
         opponent_node = oid - 1

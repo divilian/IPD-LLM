@@ -193,7 +193,8 @@ class BrowserAgent(IPDAgent):
         self,
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
         starting_neighbors: set[int],
-        my_foafs: set[int],
+        new_neighbor_candidates: set[int],
+        max_rewires: int,
     ) -> list[int]:
         """
         BrowserAgent policy: anyone who's defected a lot recently gets the axe.
@@ -207,6 +208,8 @@ class BrowserAgent(IPDAgent):
             ):
                 sever_targets.append(node)
 
+        if sever_targets and self.model.debug:
+            print(f"Severing from {sever_targets}")
         return sever_targets
 
     def _has_defected_too_often(self, other_history):
@@ -233,7 +236,7 @@ class BrowserAgent(IPDAgent):
     def choose_new_neighbors(
         self,
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-        eligible_foafs: set[int],
+        eligible_new_neighbors: set[int],
         num_needed_replacements: int,
         severed_nodes: set[int],
         starting_neighbors: set[int],
@@ -241,11 +244,13 @@ class BrowserAgent(IPDAgent):
         """
         BrowserAgent policy: pick random eligible FOAFs as replacements.
         """
-        if not eligible_foafs or num_needed_replacements <= 0:
+        if not eligible_new_neighbors or num_needed_replacements <= 0:
             return []
 
-        candidates = list(eligible_foafs)
+        candidates = list(eligible_new_neighbors)
         self.model.random.shuffle(candidates)
+        if candidates and self.model.debug:
+            print(f"Connecting to {candidates[:num_needed_replacements]}")
         return candidates[:num_needed_replacements]
 
     def shape(self) -> str:

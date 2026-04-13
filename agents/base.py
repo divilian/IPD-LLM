@@ -92,12 +92,13 @@ class IPDAgent(CellAgent):
         """
         def sanitize_sever_targets(
             sever_targets: list[int],
-            starting_neighbors: set[int],
+            current_neighbors: set[int],
+            max_rewires: int,
         ) -> list[int]:
             """
             (Helper for .rewire_as_desired() template method.)
             Keep only valid, unique, currently-adjacent neighbors.
-            Preserve input order.
+            Preserve input order and cap at max_rewires.
             """
             seen = set()
             cleaned = []
@@ -105,18 +106,20 @@ class IPDAgent(CellAgent):
             for node in sever_targets:
                 if node in seen:
                     continue
-                if node not in starting_neighbors:
+                if node not in current_neighbors:
                     continue
                 if not self.is_adjacent_to_node(node):
                     continue
                 seen.add(node)
                 cleaned.append(node)
+                if len(cleaned) >= max_rewires:
+                    break
 
             return cleaned
 
         def sanitize_new_neighbor_choices(
             chosen_new_neighbors: list[int],
-            eligible_foafs: set[int],
+            eligible_new_neighbors: set[int],
             num_needed_replacements: int,
         ) -> list[int]:
             """
@@ -130,7 +133,7 @@ class IPDAgent(CellAgent):
             for node in chosen_new_neighbors:
                 if node in seen:
                     continue
-                if node not in eligible_foafs:
+                if node not in eligible_new_neighbors:
                     continue
                 seen.add(node)
                 cleaned.append(node)
@@ -179,18 +182,26 @@ class IPDAgent(CellAgent):
                 f"{self.unique_id} (node {self.node}) is considering rewiring"
             )
 
+        current_neighbors = self._get_current_neighbors()
         my_foafs = self._get_foaf_nodes()
-        starting_neighbors = self._get_current_neighbors()
+        new_neighbor_candidates = self._get_eligible_new_neighbor_candidates(
+            candidate_nodes=my_foafs,
+            starting_neighbors=current_neighbors,
+            severed_nodes=set(),
+        )
+        max_rewires = self.model.max_rewires
 
         sever_targets = self.choose_neighbors_to_sever(
             payoff_matrix=payoff_matrix,
-            starting_neighbors=starting_neighbors,
-            my_foafs=my_foafs,
+            starting_neighbors=current_neighbors,
+            new_neighbor_candidates=new_neighbor_candidates,
+            max_rewires=max_rewires,
         )
 
         sever_targets = sanitize_sever_targets(
             sever_targets=sever_targets,
-            starting_neighbors=starting_neighbors,
+            current_neighbors=current_neighbors,
+            max_rewires=max_rewires,
         )
 
         severed_nodes = sever_connections(sever_targets)
@@ -208,23 +219,23 @@ class IPDAgent(CellAgent):
         if not num_needed_replacements:
             return
 
-        eligible_foafs = self._get_eligible_rewiring_candidates(
-            my_foafs,
-            starting_neighbors,
-            severed_nodes,
+        eligible_new_neighbors = self._get_eligible_new_neighbor_candidates(
+            candidate_nodes=my_foafs,
+            starting_neighbors=current_neighbors,
+            severed_nodes=severed_nodes,
         )
 
         chosen_new_neighbors = self.choose_new_neighbors(
             payoff_matrix=payoff_matrix,
-            eligible_foafs=eligible_foafs,
+            eligible_new_neighbors=eligible_new_neighbors,
             num_needed_replacements=num_needed_replacements,
             severed_nodes=severed_nodes,
-            starting_neighbors=starting_neighbors,
+            starting_neighbors=current_neighbors,
         )
 
         chosen_new_neighbors = sanitize_new_neighbor_choices(
             chosen_new_neighbors=chosen_new_neighbors,
-            eligible_foafs=eligible_foafs,
+            eligible_new_neighbors=eligible_new_neighbors,
             num_needed_replacements=num_needed_replacements,
         )
 
@@ -234,7 +245,8 @@ class IPDAgent(CellAgent):
         self,
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
         starting_neighbors: set[int],
-        my_foafs: set[int],
+        new_neighbor_candidates: set[int],
+        max_rewires: int,
     ) -> list[int]:
         """
         Hook method.
@@ -247,7 +259,7 @@ class IPDAgent(CellAgent):
     def choose_new_neighbors(
         self,
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-        eligible_foafs: set[int],
+        eligible_new_neighbors: set[int],
         num_needed_replacements: int,
         severed_nodes: set[int],
         starting_neighbors: set[int],
@@ -256,9 +268,9 @@ class IPDAgent(CellAgent):
         Hook method.
 
         Return a list of node IDs to connect to.
-        Default behavior: choose uniformly at random from eligible FOAFs.
+        Default behavior: choose uniformly at random from eligible new neighbors.
         """
-        eligible = list(eligible_foafs)
+        eligible = list(eligible_new_neighbors)
         self.model.random.shuffle(eligible)
         return eligible[:num_needed_replacements]
 
@@ -394,28 +406,28 @@ class IPDAgent(CellAgent):
             foafs.update(foaf_dict.keys())
 
         foafs.discard(self.node)
-        return foafs 
+        return foafs
 
-    def _get_eligible_rewiring_candidates(
+    def _get_eligible_new_neighbor_candidates(
         self,
         candidate_nodes: set[int],
         starting_neighbors: set[int],
         severed_nodes: set[int],
     ) -> set[int]:
         """
-        Return the subset of candidate rewiring targets that are valid for
-        immediate replacement.
+        Filter a broad pool of possible new-neighbor targets down to the nodes
+        that are actually eligible to be added as neighbors in the current
+        rewiring event.
+
+        candidate_nodes: a to-be-culled list of the nodes you could potentially
+        add as neighbors
+
+        starting_neighbors: your neighbors list as it was at the start of this
+        rewiring event.
+
+        severed_nodes: the nodes you disconnected from in the first phase of
+        this rewiring event.
         """
-        # Remove from consideration:
-        # - myself,
-        # - anyone who was already my neighbor when this rewiring step began,
-        # and
-        # - anyone I just severed.
-        #
-        # Note that `severed_nodes` is logically redundant with
-        # `starting_neighbors`, but I am leaving it explicit here because it
-        # makes the intent clearer: someone I just dumped should not be
-        # eligible as an immediate replacement.
         eligible_nodes = set(candidate_nodes)
         eligible_nodes -= {self.node}
         eligible_nodes -= starting_neighbors
