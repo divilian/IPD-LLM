@@ -317,9 +317,9 @@ class IPDAgent(CellAgent):
 
     def _get_current_neighbors(self) -> set[int]:
         return {
-            node
-            for node in self.history
-            if self.is_adjacent_to_node(node)
+            cell.coordinate
+            for cell in self.cell.neighborhood.cells
+            if cell.coordinate != self.node and cell.agents
         }
 
 
