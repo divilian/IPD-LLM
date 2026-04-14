@@ -161,13 +161,6 @@ def parse_args():
         help="Auto-clobber LLM output file if exists? (def: false)",
     )
     parser.add_argument(
-        "--backend",
-        type=str,
-        choices=["ollama", "mock", "llamacpp"],
-        default="ollama",
-        help="LLM backend to use",
-    )
-    parser.add_argument(
         "--ollama-model",
         type=str,
         default="llama3.1:8b-instruct-q4_K_M",
