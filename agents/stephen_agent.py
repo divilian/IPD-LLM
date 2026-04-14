@@ -24,16 +24,12 @@ class StephenAgent(LLMAgent):
         model: Model,
         cell: Cell,
         rewiring_aware: bool = False,
-        relationship_data_mode: str = "summary",
-        rewiring_recent_k: int = 3,
         backend=None,
     ):
         super().__init__(
             model=model,
             cell=cell,
             rewiring_aware=rewiring_aware,
-            relationship_data_mode=relationship_data_mode,
-            rewiring_recent_k=rewiring_recent_k,
             backend=backend,
         )
 

@@ -11,9 +11,7 @@ import numpy as np
 from agents.factory import AgentFactory
 from agents.llm_agent import LLMAgent
 from graph.sbm import compute_sbm_probs
-from llm.backend import LLMBackend
 from llm.ollama_backend import OllamaBackend
-from llm.mock_backend import MockBackend
 
 
 class IPDModel(Model):
@@ -32,7 +30,7 @@ class IPDModel(Model):
         agent_factory: AgentFactory,
         max_rewires: int,
         give_rationales: bool,
-        llm_backend: LLMBackend,
+        llm_backend: OllamaBackend,
         ollama_model: str,
         llm_out_file: str,
         debug: bool,

@@ -47,7 +47,6 @@ def resolve_agent_spec(
     if name == "LLM":
         return LLMAgent, {
             "rewiring_aware": args.llm_rewiring_aware,
-            "relationship_data_mode": args.llm_relationship_data_mode,
         }
 
     try:

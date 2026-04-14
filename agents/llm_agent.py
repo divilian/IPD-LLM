@@ -66,14 +66,10 @@ class LLMAgent(IPDAgent):
         model: Model,
         cell: Cell,
         rewiring_aware: bool = False,
-        relationship_data_mode: str = "summary",
-        rewiring_recent_k: int = 3,
         backend: OllamaBackend | None = None,
     ):
         super().__init__(model, cell)
         self.rewiring_aware = rewiring_aware
-        self.relationship_data_mode = relationship_data_mode
-        self.rewiring_recent_k = rewiring_recent_k
         self._pending_rewiring_plan = None
 
         if backend is not None:
@@ -201,49 +197,6 @@ Available candidate new neighbors:
     def size(self) -> int:
         return 2000
 
-    def summarize_relationship(self, history, recent_k=None):
-        if recent_k is None:
-            recent_k = self.rewiring_recent_k
-
-        rounds_played = len(history)
-        recent = history[-recent_k:]
-        recent_pairs = [
-            [m["self_move"], m["other_move"]]
-            for m in recent
-        ]
-
-        other_defections = sum(m["other_move"] == "D" for m in history)
-        other_cooperations = sum(m["other_move"] == "C" for m in history)
-
-        mutual_c = sum(
-            m["self_move"] == "C" and m["other_move"] == "C"
-            for m in history
-        )
-        mutual_d = sum(
-            m["self_move"] == "D" and m["other_move"] == "D"
-            for m in history
-        )
-
-        trailing_d = 0
-        for m in reversed(history):
-            if m["other_move"] == "D":
-                trailing_d += 1
-            else:
-                break
-
-        return {
-            "rounds_played": rounds_played,
-            "recent_pairs": recent_pairs,
-            "other_coop_rate": (
-                other_cooperations / rounds_played if rounds_played else 0.0
-            ),
-            "other_defect_rate": (
-                other_defections / rounds_played if rounds_played else 0.0
-            ),
-            "other_last_n_defections": trailing_d,
-            "mutual_cooperation_count": mutual_c,
-            "mutual_defection_count": mutual_d,
-        }
 
     def _plan_rewiring_once(
         self,

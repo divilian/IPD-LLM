@@ -24,7 +24,6 @@ import matplotlib.pyplot as plt
 from model import IPDModel
 from agents.factory import AGENT_REGISTRY
 from llm.ollama_backend import OllamaBackend
-from llm.backend import create_backend
 from agents.factory import AgentFactory
 from analysis.stats import (
     per_agent_type_stats,
@@ -137,12 +136,6 @@ def parse_args():
         "--llm-rewiring-aware",
         action="store_true",
         help="LLMs make rewiring decisions? (def: false)",
-    )
-    parser.add_argument(
-        "--llm-relationship-data-mode",
-        choices=["summary", "full"],
-        help="The granularity of data that LLM agents get (def: summary)",
-        default="summary",
     )
     parser.add_argument(
         "--give-rationales",
