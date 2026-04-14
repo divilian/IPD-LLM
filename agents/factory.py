@@ -5,13 +5,10 @@ from collections.abc import Mapping
 import random as py_random  # using only Mesa's rng; this is for a type hint
 
 from agents.base import AGENT_REGISTRY
-from agents.personas import PERSONAS
 from agents.rule_based import TitForTatAgent, BrowserAgent
-from agents.simple_agent import SimpleLLMAgent
 from agents.llm_agent import LLMAgent
 from . import llm_agent   # (ensures registration happens)
 from . import rule_based  # (ensures registration happens)
-from . import simple_agent  # (ensures registration happens)
 
 def resolve_agent_spec(
     name: str,
@@ -22,30 +19,17 @@ def resolve_agent_spec(
 
     Examples:
       "Sucker"      -> (SuckerAgent, {})
-      "Mean"        -> (MeanAgent, {})
-      "LLMgrudge"   -> (LLMAgent, {"persona": "grudge"})
-      "LLMvanilla"  -> (LLMAgent, {"persona": "vanilla"})
+      "TitForTat"   -> (TitForTatAgent, {'noise':.1})
     """
     if name == "TFT":
         return TitForTatAgent, {"noise": args.tft_noise}
     if name == "Browser":
         return BrowserAgent, {"tft_noise": args.tft_noise, "patience":3}
-    if name == "SimpleLLM":
-        return SimpleLLMAgent, {
+    if name == "LLM":
+        return LLMAgent, {
             "rewiring_aware": args.llm_rewiring_aware,
             "relationship_data_mode": args.llm_relationship_data_mode,
-            "rewiring_recent_k": 3,
         }
-
-    if name.startswith("LLM"):
-        persona = name[3:].lower()
-        if persona not in PERSONAS:
-            persona_names = ", ".join(PERSONAS)
-            raise ValueError(
-                f"Unknown LLM persona {persona!r}. Must be one of "
-                f"{persona_names}."
-            )
-        return LLMAgent, {"persona": persona}
 
     try:
         return AGENT_REGISTRY[name], {}

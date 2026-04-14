@@ -23,7 +23,6 @@ import matplotlib.pyplot as plt
 
 from model import IPDModel
 from agents.base import AGENT_REGISTRY
-from agents.personas import PERSONAS
 from llm.ollama_backend import ensure_ollama_running
 from llm.backend import create_backend
 from agents.factory import AgentFactory
@@ -70,7 +69,6 @@ def parse_args():
         default=0.0,
     )
     agent_types = [t for t in AGENT_REGISTRY]
-    agent_types += [f"LLM{p}" for p in PERSONAS]
     parser.add_argument(
         "--agent-fracs",
         nargs="+",
@@ -80,7 +78,7 @@ def parse_args():
             "Agent mix as pairs: AGENT FRAC AGENT FRAC ...\n"
             "AGENT is one of:\n"
             + "".join(f"  - {agent_type}\n" for agent_type in agent_types)
-            + "Ex: --agent-fracs Sucker 0.4 Mean 0.4 LLMgrudge 0.2\n"
+            + "Ex: --agent-fracs Sucker 0.4 Mean 0.4 Random 0.2\n"
             + "(def: Sucker 0.5, Mean 0.5)"
         ),
     )

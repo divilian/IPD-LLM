@@ -11,7 +11,6 @@ import numpy as np
 from agents.factory import AgentFactory
 from agents.llm_agent import LLMAgent
 from graph.sbm import compute_sbm_probs
-from llm.prompt_builder import build_batch_prompt
 from llm.backend import LLMBackend
 from llm.ollama_backend import OllamaBackend
 from llm.mock_backend import MockBackend
@@ -132,42 +131,18 @@ class IPDModel(Model):
         return coop / total if total else 0.0
 
     def step(self) -> None:
-        asyncio.run(self._step_async())
-
-    async def _step_async(self):
 
         # Reset agent state for this new round.
         for a in self.agents:
             a.current_iter_payment = 0
             a.current_decisions.clear()
 
-        # Who are our LLM agents? They're the time-consuming ones.
-        llm_agents = [a for a in self.agents if isinstance(a, LLMAgent)]
-
-        if llm_agents and self.llm_backend is not None:
-
-            # Build the "payloads" for each agent; that is, what will be
-            # inserted into the batch prompt for the LLM to make decisions
-            # about.
-            payloads = [a.decision_context() for a in llm_agents]
-
-            # Given all the necessary LLM agent state info, build the prompt.
-            prompt = build_batch_prompt(payloads, self.payoff_matrix)
-
-            # Twiddle our thumbs until the LLM gives us decisions on all of the
-            # agents.
-            response = await self.llm_backend.batch_decide(prompt)
-
-            # Record the LLM's decisions in each agent.
-            self._apply_llm_decisions(response['decisions'])
-
-        # Okay, now we can run the fast-moving guys.
         if self.debug:
             print(
-                f"========== Rule-based agents running in iter {self.steps} "
+                f"========== Agents running in iter {self.steps} "
                 f"of {self.num_iter} =========="
             )
-        self._run_rule_agents()
+        self._run_agents()
 
         # Actually "commit" the moves by propagating to agent inst vars (wealth
         # and history).
@@ -206,16 +181,26 @@ class IPDModel(Model):
                 )
             self.node_to_agent[aid].current_decisions[oid] = move
 
-    def _run_rule_agents(self) -> None:
-        rule_agents = [a for a in self.agents if not isinstance(a, LLMAgent)]
-        for ra in rule_agents:
-            for n in self.network.G.neighbors(ra.node):
-                output = ra.decide_against(
+#    def _run_rule_agents(self) -> None:
+#        rule_agents = [a for a in self.agents if not isinstance(a, LLMAgent)]
+#        for ra in rule_agents:
+#            for n in self.network.G.neighbors(ra.node):
+#                output = ra.decide_against(
+#                    self.node_to_agent[n],
+#                    self.payoff_matrix,
+#                    give_rationale=self.give_rationales
+#                )
+#                ra.current_decisions[n], _ = output
+
+    def _run_agents(self) -> None:
+        for a in self.agents:
+            for n in self.network.G.neighbors(a.node):
+                output = a.decide_against(
                     self.node_to_agent[n],
                     self.payoff_matrix,
                     give_rationale=self.give_rationales
                 )
-                ra.current_decisions[n], _ = output
+                a.current_decisions[n], _ = output
 
     def _resolve_payoffs(self) -> None:
         """
