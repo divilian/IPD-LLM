@@ -1,14 +1,33 @@
+from collections.abc import Callable
+from typing import TypeVar
 import argparse
 import math
 from dataclasses import dataclass
 from collections.abc import Mapping
 import random as py_random  # using only Mesa's rng; this is for a type hint
 
-from agents.base import AGENT_REGISTRY
-from agents.rule_based import TitForTatAgent, BrowserAgent
-from agents.llm_agent import LLMAgent
-from . import llm_agent   # (ensures registration happens)
-from . import rule_based  # (ensures registration happens)
+T = TypeVar("T")
+
+
+AGENT_REGISTRY: dict[str, type] = {}
+
+def register_agent(name: str) -> Callable[[T], T]:
+    """
+    Decorator for new Agent IPDsubclasses.
+    """
+    def decorator(cls: T) -> T:
+        AGENT_REGISTRY[name] = cls
+        return cls
+    return decorator
+
+
+from .base import IPDAgent
+from .llm_agent import LLMAgent
+from .rule_based import TitForTatAgent, BrowserAgent
+from .stephen_agent import StephenAgent
+from .student_template import StudentTemplateAgent
+
+
 
 def resolve_agent_spec(
     name: str,

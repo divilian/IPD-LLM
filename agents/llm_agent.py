@@ -1,35 +1,30 @@
-import json
-import requests
+from __future__ import annotations
 
 from mesa import Model
-from mesa.discrete_space import Cell, CellAgent
+from mesa.discrete_space import Cell
 
-from .base import IPDAgent, register_agent
+from .base import IPDAgent
+from .factory import register_agent
+from llm.ollama_backend import OllamaBackend
 
 
 MOVE_PLUS_RATIONALE_DECISION_SCHEMA = {
     "type": "object",
     "properties": {
-        "move": {
-            "enum": ["C", "D"]
-        },
-        "reason": {
-            "type": "string"
-        },
+        "move": {"enum": ["C", "D"]},
+        "reason": {"type": "string"},
     },
     "required": ["move", "reason"],
-    "additionalProperties": False
+    "additionalProperties": False,
 }
 
 MOVE_ONLY_DECISION_SCHEMA = {
     "type": "object",
     "properties": {
-        "move": {
-            "enum": ["C", "D"]
-        },
+        "move": {"enum": ["C", "D"]},
     },
     "required": ["move"],
-    "additionalProperties": False
+    "additionalProperties": False,
 }
 
 REWIRING_DECISION_SCHEMA = {
@@ -37,22 +32,35 @@ REWIRING_DECISION_SCHEMA = {
     "properties": {
         "drop_ids": {
             "type": "array",
-            "items": {"type": "string"}
+            "items": {"type": "string"},
         },
         "add_ids": {
             "type": "array",
-            "items": {"type": "string"}
+            "items": {"type": "string"},
         },
-        "reason": {
-            "type": "string"
-        }
+        "reason": {"type": "string"},
     },
     "required": ["drop_ids", "add_ids"],
-    "additionalProperties": False
+    "additionalProperties": False,
 }
+
 
 @register_agent("LLMAgent")
 class LLMAgent(IPDAgent):
+    """
+    Generic LLM-driven IPD agent.
+
+    This is intended to be a student's starting point:
+    - generic prompt structure
+    - generic rewiring workflow
+    - no especially opinionated strategy beyond "make a choice given the game state"
+
+    Subclasses may override:
+    - system_prompt()
+    - build_decision_prompt()
+    - build_rewiring_prompt()
+    """
+
     def __init__(
         self,
         model: Model,
@@ -60,6 +68,7 @@ class LLMAgent(IPDAgent):
         rewiring_aware: bool = False,
         relationship_data_mode: str = "summary",
         rewiring_recent_k: int = 3,
+        backend: OllamaBackend | None = None,
     ):
         super().__init__(model, cell)
         self.rewiring_aware = rewiring_aware
@@ -67,6 +76,89 @@ class LLMAgent(IPDAgent):
         self.rewiring_recent_k = rewiring_recent_k
         self._pending_rewiring_plan = None
 
+        if backend is not None:
+            self.backend = backend
+        else:
+            self.backend = OllamaBackend(self.model.ollama_model)
+
+    def system_prompt(self) -> str | None:
+        return (
+            "You are an agent in an iterated prisoner's dilemma simulation. "
+            "Read the game state carefully and return a valid answer that matches the requested format."
+        )
+
+    def build_decision_prompt(
+        self,
+        other: "IPDAgent",
+        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+    ) -> str:
+        prompt = f"""You are playing an iterated prisoner's dilemma.
+
+Payoffs to you:
+CC -> {payoff_matrix['C', 'C'][0]}
+DD -> {payoff_matrix['D', 'D'][0]}
+DC -> {payoff_matrix['D', 'C'][0]}
+CD -> {payoff_matrix['C', 'D'][0]}
+
+History against this opponent:
+{self.serialize_history(self.history, other.unique_id)}
+
+Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
+
+Choose your next move.
+"""
+
+        if self.rewiring_aware:
+            prompt += (
+                "\nAfter this round, you may have an opportunity to sever connections "
+                "with current opponents and have them replaced with new opponents drawn "
+                "from your friends-of-friends.\n"
+            )
+
+        return prompt
+
+    def build_rewiring_prompt(
+        self,
+        starting_neighbors: set[int],
+        new_neighbor_candidates: set[int],
+        max_rewires: int,
+        give_rationale: bool,
+    ) -> str:
+        current_neighbor_lines = []
+        for node in sorted(starting_neighbors):
+            hist = self.serialize_history(self.history, node + 1)
+            current_neighbor_lines.append(f"- node={node}\n{hist}")
+
+        current_neighbor_text = (
+            "\n".join(current_neighbor_lines) if current_neighbor_lines else "(none)"
+        )
+
+        candidate_lines = []
+        for node in sorted(new_neighbor_candidates):
+            mutual_contacts = sorted(starting_neighbors & self._get_neighbors_of_node(node))
+            candidate_lines.append(
+                f"- node={node}, mutual_contacts={mutual_contacts}"
+            )
+
+        candidate_text = "\n".join(candidate_lines) if candidate_lines else "(none)"
+
+        prompt = f"""You are deciding how to rewire your social network in a networked iterated prisoner's dilemma.
+
+You may sever up to {max_rewires} current neighbors and add up to {max_rewires} new neighbors.
+
+Current neighbors and your history against each:
+{current_neighbor_text}
+
+Available candidate new neighbors:
+{candidate_text}
+"""
+
+        if give_rationale:
+            prompt += "\nInclude a brief reason."
+        else:
+            prompt += "\nDo not include a reason."
+
+        return prompt
 
     def decide_against(
         self,
@@ -74,27 +166,7 @@ class LLMAgent(IPDAgent):
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
         give_rationale: bool,
     ) -> tuple[str, str]:
-        prompt = f"""You are playing an iterated prisoner's dilemma for {self.model.num_iter} rounds.
-
-Payoffs to you:
-CC -> {payoff_matrix['C','C'][0]}
-DD -> {payoff_matrix['D','D'][0]}
-DC -> {payoff_matrix['D','C'][0]}
-CD -> {payoff_matrix['C','D'][0]}
-
-History against this opponent:
-{self.serialize_history(self.history, other.unique_id)}
-
-Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
-
-Choose the move that maximizes your total payoff over the entire game."""
-
-        if self.rewiring_aware:
-            prompt += (
-                "\nAfter this round, you will have the opportunity to sever "
-                "connections with current opponents and have them replaced "
-                "with new opponents drawn from your friends-of-friends.\n"
-            )
+        prompt = self.build_decision_prompt(other, payoff_matrix)
 
         if give_rationale:
             num_predict = 256
@@ -103,10 +175,11 @@ Choose the move that maximizes your total payoff over the entire game."""
             num_predict = 16
             schema = MOVE_ONLY_DECISION_SCHEMA
 
-        resp = self._call_ollama_json(
-            prompt,
-            num_predict,
+        resp = self.backend.generate_json(
+            prompt=prompt,
+            num_predict=num_predict,
             schema=schema,
+            system=self.system_prompt(),
         )
 
         decision = resp["move"].strip().upper()
@@ -122,113 +195,10 @@ Choose the move that maximizes your total payoff over the entire game."""
 
         return decision, rationale
 
-
-    def _call_ollama(
-        self,
-        prompt: str,
-        num_predict: int,
-        system: str | None = None,
-        response_format: str | dict | None = None,
-        temperature: float = 0.0,
-    ) -> str:
-        payload = {
-            "model": self.model.ollama_model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "seed": 123,
-                "temperature": temperature,
-                "num_ctx": 2048,
-                "num_predict": num_predict,
-            },
-        }
-
-        if system is not None:
-            payload["system"] = system
-
-        if response_format is not None:
-            payload["format"] = response_format
-
-        r = requests.post(
-            "http://localhost:11434/api/generate",
-            json=payload,
-            timeout=120,
-        )
-        r.raise_for_status()
-
-        data = r.json()
-
-        if "response" not in data:
-            raise RuntimeError(f"Unexpected Ollama response payload: {data}")
-
-        if data.get("done") is False:
-            raise RuntimeError(f"Ollama did not finish generation: {data}")
-
-        done_reason = data.get("done_reason")
-        if done_reason == "length":
-            raise RuntimeError("Ollama output was truncated (done_reason='length'). Increase num_predict.")
-
-        return data["response"].strip()
-
-
-    def _call_ollama_json(
-        self,
-        prompt: str,
-        num_predict: int,
-        *,
-        schema: dict,
-        system: str | None = None,
-    ) -> dict:
-        effective_system = (
-            system
-            or "Return only valid JSON matching the provided schema. "
-               "Do not output any text outside the JSON object."
-        )
-
-        text = self._call_ollama(
-            prompt=prompt,
-            num_predict=num_predict,
-            system=effective_system,
-            response_format=schema,
-            temperature=0.0,
-        )
-
-        try:
-            obj = json.loads(text)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Model returned invalid JSON: {text[:500]!r}",
-            ) from e
-
-        if not isinstance(obj, dict):
-            raise ValueError(
-                f"Expected top-level JSON object, got {type(obj).__name__}",
-            )
-
-        return obj
-
-#    def _call_ollama(self, prompt: str, num_predict: int) -> str:
-#        r = requests.post(
-#            "http://localhost:11434/api/generate",
-#            json={
-#                "model": self.model.ollama_model,
-#                "prompt": prompt,
-#                "options": {
-#                    "seed": 123,
-#                    "num_ctx": 2048,
-#                    "num_predict": num_predict,
-#                    "temperature": 0,
-#                },
-#                "stream": False,
-#            },
-#        )
-#        data = r.json()
-#        return data["response"]
-
     def shape(self) -> str:
-        return "h"   # Hex
+        return "h"  # Hex
 
-    def size(self) -> str:
+    def size(self) -> int:
         return 2000
 
     def summarize_relationship(self, history, recent_k=None):
@@ -241,8 +211,10 @@ Choose the move that maximizes your total payoff over the entire game."""
             [m["self_move"], m["other_move"]]
             for m in recent
         ]
+
         other_defections = sum(m["other_move"] == "D" for m in history)
         other_cooperations = sum(m["other_move"] == "C" for m in history)
+
         mutual_c = sum(
             m["self_move"] == "C" and m["other_move"] == "C"
             for m in history
@@ -273,7 +245,6 @@ Choose the move that maximizes your total payoff over the entire game."""
             "mutual_defection_count": mutual_d,
         }
 
-
     def _plan_rewiring_once(
         self,
         starting_neighbors: set[int],
@@ -281,56 +252,18 @@ Choose the move that maximizes your total payoff over the entire game."""
         max_rewires: int,
         give_rationale: bool = False,
     ) -> dict:
-        current_neighbor_lines = []
-        for node in sorted(starting_neighbors):
-            hist = self.serialize_history(self.history, node + 1)
-            current_neighbor_lines.append(
-                f"- node={node}\n{hist}"
-            )
-
-        current_neighbor_text = (
-            "\n".join(current_neighbor_lines)
-            if current_neighbor_lines else
-            "(none)"
+        prompt = self.build_rewiring_prompt(
+            starting_neighbors=starting_neighbors,
+            new_neighbor_candidates=new_neighbor_candidates,
+            max_rewires=max_rewires,
+            give_rationale=give_rationale,
         )
 
-        candidate_lines = []
-        for node in sorted(new_neighbor_candidates):
-            mutual_contacts = sorted(
-                starting_neighbors & self._get_neighbors_of_node(node)
-            )
-            candidate_lines.append(
-                f"- node={node}, mutual_contacts={mutual_contacts}"
-            )
-
-        candidate_text = (
-            "\n".join(candidate_lines)
-            if candidate_lines else
-            "(none)"
-        )
-
-        prompt = f"""You are deciding how to rewire your social network in a networked iterated prisoner's dilemma.
-
-    You may sever up to {max_rewires} current neighbors and add up to {max_rewires} new neighbors.
-
-    Your goal is to maximize your future total payoff.
-
-    Current neighbors and your history against each:
-    {current_neighbor_text}
-
-    Available candidate new neighbors:
-    {candidate_text}
-    """
-
-        if give_rationale:
-            prompt += "\nInclude a brief reason."
-        else:
-            prompt += "\nDo not include a reason."
-
-        resp = self._call_ollama_json(
+        resp = self.backend.generate_json(
             prompt=prompt,
             num_predict=192 if give_rationale else 96,
             schema=REWIRING_DECISION_SCHEMA,
+            system=self.system_prompt(),
         )
 
         drop_ids = resp.get("drop_ids", [])
@@ -367,7 +300,6 @@ Choose the move that maximizes your total payoff over the entire game."""
 
         return plan
 
-
     def choose_neighbors_to_sever(
         self,
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
@@ -377,13 +309,13 @@ Choose the move that maximizes your total payoff over the entire game."""
     ) -> list[int]:
         if not self.rewiring_aware:
             return []
+
         self._pending_rewiring_plan = self._plan_rewiring_once(
             starting_neighbors=starting_neighbors,
             new_neighbor_candidates=new_neighbor_candidates,
             max_rewires=max_rewires,
         )
         return self._pending_rewiring_plan["drop_ids"]
-
 
     def choose_new_neighbors(
         self,
@@ -395,6 +327,7 @@ Choose the move that maximizes your total payoff over the entire game."""
     ) -> list[int]:
         if not self.rewiring_aware:
             return []
+
         if self._pending_rewiring_plan is None:
             raise RuntimeError(
                 "choose_new_neighbors() called without a pending rewiring "
@@ -429,9 +362,11 @@ Choose the move that maximizes your total payoff over the entire game."""
             f"Here is the history of your games with this opponent "
             f"({opponent_node}) so far:\n"
         )
+
         for h in history[opponent_node]:
             prompt += (
                 f"On turn {h['step']}, you chose {h['self_move']} and "
                 f"your opponent chose {h['other_move']}.\n"
             )
+
         return prompt

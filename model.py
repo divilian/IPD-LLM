@@ -101,6 +101,9 @@ class IPDModel(Model):
         assert set(self.node_to_agent.keys()) == set(self.network.G.nodes)
         assert all(a.node == n for n, a in self.node_to_agent.items())
 
+        if self.llm_backend:
+            self.llm_backend.ensure_ollama_running()
+
     def assortativity(self) -> float:
         """
         Return the graph's assortativity by agent type. A value of 0 means
@@ -181,17 +184,6 @@ class IPDModel(Model):
                 )
             self.node_to_agent[aid].current_decisions[oid] = move
 
-#    def _run_rule_agents(self) -> None:
-#        rule_agents = [a for a in self.agents if not isinstance(a, LLMAgent)]
-#        for ra in rule_agents:
-#            for n in self.network.G.neighbors(ra.node):
-#                output = ra.decide_against(
-#                    self.node_to_agent[n],
-#                    self.payoff_matrix,
-#                    give_rationale=self.give_rationales
-#                )
-#                ra.current_decisions[n], _ = output
-
     def _run_agents(self) -> None:
         for a in self.agents:
             for n in self.network.G.neighbors(a.node):
@@ -247,7 +239,11 @@ class IPDModel(Model):
         connection that that later agent won't have when it goes to rewire.
         Oh well.
         """
-        self.agents.shuffle_do("rewire_as_desired", self.payoff_matrix)
+        self.agents.shuffle_do(
+            "rewire_as_desired",
+            self.payoff_matrix,
+            self.max_rewires,
+        )
 
     def estimate_expected_avg_wealth(self):
         """

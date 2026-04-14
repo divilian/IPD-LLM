@@ -3,7 +3,8 @@ from typing import Tuple
 from mesa import Model
 from mesa.discrete_space import CellAgent, Cell
 
-from .base import IPDAgent, register_agent
+from .base import IPDAgent
+from .factory import register_agent
 
 @register_agent("Sucker")
 class SuckerAgent(IPDAgent):

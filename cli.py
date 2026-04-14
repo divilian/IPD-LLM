@@ -22,8 +22,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from model import IPDModel
-from agents.base import AGENT_REGISTRY
-from llm.ollama_backend import ensure_ollama_running
+from agents.factory import AGENT_REGISTRY
+from llm.ollama_backend import OllamaBackend
 from llm.backend import create_backend
 from agents.factory import AgentFactory
 from analysis.stats import (
@@ -259,9 +259,12 @@ def interact_with_model(m: IPDModel):
         node_num_str = input(node_prompt(m))
 
 
-def setup_llms_and_logging(args):
+def setup_runtime(args):
+    logging.basicConfig(
+        level=args.log_level,
+        format="%(message)s"
+    )
     if any(['LLM' in a for a in args.agent_fracs]):
-        ensure_ollama_running(args.ollama_model)
         out_path = Path(args.llm_out_file)
         if out_path.exists():
             if args.llm_out_file_clobber:
@@ -274,17 +277,13 @@ def setup_llms_and_logging(args):
                     out_path.unlink()
         with open(out_path, "a", encoding="utf-8") as f:
             print("=============================================", file=f)
-    logging.basicConfig(
-        level=args.log_level,
-        format="%(message)s"
-    )
 
 
 if __name__ == "__main__":
 
     args = parse_args()
 
-    setup_llms_and_logging(args)
+    setup_runtime(args)
 
     stats = []
 
@@ -302,11 +301,13 @@ if __name__ == "__main__":
 
     factory = AgentFactory.instance(args.agent_fracs, args)
 
-    # Only initialize an LLM backend if we're actually going to use it.
-    if any(str(name).startswith("LLM") for name in args.agent_fracs):
-        backend = create_backend(args)
-    else:
-        backend = None
+    backend = OllamaBackend(
+        model_name=args.ollama_model,
+        host="http://localhost:11434",
+        timeout=120,
+        seed=123,
+        num_ctx=2048,
+    )
 
     m = IPDModel(
         N=args.N,
