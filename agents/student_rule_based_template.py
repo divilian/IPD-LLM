@@ -1,10 +1,12 @@
 from .base import IPDAgent
 from .factory import register_agent
 
-@register_agent("StudentTemplate")
-class StudentTemplateAgent(IPDAgent):
+@register_agent("StudentRuleBasedTemplate")
+class StudentRuleBasedTemplate(IPDAgent):
     """
-    Minimal example agent for students.
+    Starting point for writing a rule-based IPD agent.
+
+    (You should edit this file, not llm_agent.py.)
 
     Override any of these methods to customize behavior:
       - decide_against()            required
