@@ -25,7 +25,7 @@ from .base import IPDAgent
 from .llm_agent import LLMAgent
 from .rule_based import TitForTatAgent, BrowserAgent
 from .stephen_agent import StephenAgent
-from .student_template import StudentTemplateAgent
+from .student_rule_based_template import StudentRuleBasedTemplate
 
 
 
