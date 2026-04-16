@@ -8,11 +8,18 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
+from matplotlib.patches import Ellipse
 import networkx as nx
-
 
 DEF_VIDEO_FILE = "animation.mp4"
 DEF_FRAME_PREFIX = "plot"
+
+
+def player_display_name(agent) -> str:
+    name_method = getattr(agent, "name", None)
+    if callable(name_method):
+        return str(name_method())
+    return agent.__class__.__name__
 
 
 def setup_plotting(model, interactive=True) -> dict:
@@ -29,7 +36,7 @@ def setup_plotting(model, interactive=True) -> dict:
     they can later be assembled into a video file.
     """
     pos = nx.spring_layout(model.network.G, seed=model.seed, k=1.2)
-    cmap = mpl.colormaps["coolwarm"]  # blue->white->red
+    cmap = mpl.colormaps["coolwarm"]   # blue->white->red
     fig, ax = plt.subplots(constrained_layout=True, figsize=(9, 8))
     ax.set_axis_off()
     norm = Normalize(
@@ -63,9 +70,34 @@ def setup_plotting(model, interactive=True) -> dict:
     }
 
 
+def _draw_player_oval(ax, pos, color, label):
+    x, y = pos
+    width = max(0.20, 0.04 * max(len(label), 4))
+    height = 0.13
+    ellipse = Ellipse(
+        (x, y),
+        width=width,
+        height=height,
+        facecolor=color,
+        edgecolor="black",
+        linewidth=1.2,
+        zorder=3,
+    )
+    ax.add_patch(ellipse)
+    ax.text(
+        x,
+        y,
+        label,
+        ha="center",
+        va="center",
+        fontsize=10,
+        color="black",
+        zorder=4,
+    )
+
 
 def plot(model, ctx, monies, t, num_iter, interactive=True):
-    # Update node positions gracefully.
+    # Update node positions gracefully.  
     ctx["pos"] = nx.spring_layout(model.network.G, pos=ctx["pos"], k=1.2)
     ctx["ax"].clear()
     ctx["ax"].set_axis_off()
@@ -78,29 +110,47 @@ def plot(model, ctx, monies, t, num_iter, interactive=True):
         ax=ctx["ax"]
     )
 
+    nodes = list(model.network.G.nodes())
+    colors = [ctx["cmap"](ctx["norm"](w)) for w in monies]
+
+    ordinary_nodes = [n for n in nodes if not model.is_custom_player_node(n)]
+    if ordinary_nodes:
+        ordinary_shapes = [model.node_to_agent[i].shape() for i in ordinary_nodes]
+        ordinary_sizes = [model.node_to_agent[i].size() for i in ordinary_nodes]
+        ordinary_colors = [colors[nodes.index(i)] for i in ordinary_nodes]
+        for shape in set(ordinary_shapes):
+            idx = [i for i, s in enumerate(ordinary_shapes) if s == shape]
+            nx.draw_networkx_nodes(
+                model.network.G,
+                pos=ctx["pos"],
+                nodelist=[ordinary_nodes[i] for i in idx],
+                node_color=[ordinary_colors[i] for i in idx],
+                node_size=[ordinary_sizes[i] for i in idx],
+                node_shape=shape,
+                ax=ctx["ax"],
+            )
+
+    label_nodes = {}
+    for i, node in enumerate(nodes):
+        agent = model.node_to_agent[node]
+        if model.is_custom_player_node(node):
+            _draw_player_oval(
+                ctx["ax"],
+                ctx["pos"][node],
+                colors[i],
+                player_display_name(agent),
+            )
+        else:
+            label_nodes[node] = str(node)
+
     nx.draw_networkx_labels(
         model.network.G,
         pos=ctx["pos"],
+        labels=label_nodes,
         font_size=10,
         font_color="black",
         ax=ctx["ax"]
     )
-
-    nodes = list(model.network.G.nodes())
-    colors = [ctx["cmap"](ctx["norm"](w)) for w in monies]
-    shapes = [model.node_to_agent[i].shape() for i in nodes]
-    sizes = [model.node_to_agent[i].size() for i in nodes]
-    for shape in set(shapes):
-        idx = [i for i, s in enumerate(shapes) if s == shape]
-        nx.draw_networkx_nodes(
-            model.network.G,
-            pos=ctx["pos"],
-            nodelist=[nodes[i] for i in idx],
-            node_color=[colors[i] for i in idx],
-            node_size=[sizes[i] for i in idx],
-            node_shape=shape,
-            ax=ctx["ax"],
-        )
 
     ctx["fig"].suptitle(f"Iteration {t+1} of {num_iter}")
 
@@ -119,11 +169,9 @@ def plot(model, ctx, monies, t, num_iter, interactive=True):
         ctx["frame_idx"] = frame_idx + 1
 
 
-
 def _require_ffmpeg():
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg was not found on PATH")
-
 
 
 def finalize_plotting(ctx, output_file=DEF_VIDEO_FILE, fps=10):
@@ -144,7 +192,6 @@ def finalize_plotting(ctx, output_file=DEF_VIDEO_FILE, fps=10):
     )
     cleanup_plot_frames(ctx)
     return output_path
-
 
 
 def frames_to_mp4(frame_dir, output_file=DEF_VIDEO_FILE, fps=10):
@@ -172,12 +219,11 @@ def frames_to_mp4(frame_dir, output_file=DEF_VIDEO_FILE, fps=10):
             str(output_file),
         ],
         check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     return output_file
-
 
 
 def cleanup_plot_frames(ctx):
@@ -186,13 +232,11 @@ def cleanup_plot_frames(ctx):
     """
     frame_dir = ctx.get("frame_dir")
     if frame_dir is not None:
-        for frame_path in Path(
-            frame_dir,
-        ).glob(f"{DEF_FRAME_PREFIX}[0-9][0-9][0-9].svg"):
+        for frame_path in Path(frame_dir).glob(f"{DEF_FRAME_PREFIX}[0-9][0-9][0-9].svg"):
             frame_path.unlink(missing_ok=True)
 
     temp_dir = ctx.get("temp_dir")
     if temp_dir is not None:
         temp_dir.cleanup()
-        ctx["temp_dir"] = None
-        ctx["frame_dir"] = None
+    ctx["temp_dir"] = None
+    ctx["frame_dir"] = None

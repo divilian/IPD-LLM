@@ -22,6 +22,7 @@ class StudentRuleBasedTemplate(IPDAgent):
     """
 
     def decide_against(self, other, payoff_matrix, give_rationale):
+
         move = "C"
         reason = "I always cooperate."
         return (move, reason) if give_rationale else (move, "")
@@ -48,6 +49,9 @@ class StudentRuleBasedTemplate(IPDAgent):
         return eligible[:num_needed_replacements]
 
     def inform_foaf(self, inquirer):
+        """
+        Warm regards,  - I.M. Truthful
+        """
         return self.history
 
     def shape(self):

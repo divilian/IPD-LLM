@@ -3,8 +3,8 @@ from __future__ import annotations
 from mesa import Model
 from mesa.discrete_space import Cell
 
-from .factory import register_agent
-from .llm_agent import LLMAgent
+from agents.factory import register_agent
+from agents.llm_agent import LLMAgent
 
 
 @register_agent("Stephen")
@@ -120,3 +120,6 @@ and prefer adding candidates who seem promising based on the network information
             prompt += "\nDo not include a reason."
 
         return prompt
+
+    def name(self):
+        return "Stephen"

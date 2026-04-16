@@ -1,16 +1,13 @@
 from typing import List, Tuple
-import logging
 from collections import Counter
-import asyncio
 
 from mesa import Model, DataCollector
 from mesa.discrete_space import Network
 import networkx as nx
 import numpy as np
 
+from agents.base import IPDAgent
 from agents.factory import AgentFactory
-from agents.llm_agent import LLMAgent
-from graph.sbm import compute_sbm_probs
 from llm.ollama_backend import OllamaBackend
 
 
@@ -21,13 +18,14 @@ class IPDModel(Model):
 
     def __init__(
         self,
-        N,  # num agents
+        N,
         avg_degree: float,
         payoff_matrix: List[Tuple],
         p_same: float,
         p_diff: float,
         num_iter: int,
         agent_factory: AgentFactory,
+        extra_agent_classes: list[type[IPDAgent]] | None,
         max_rewires: int,
         give_rationales: bool,
         llm_backend: OllamaBackend,
@@ -48,33 +46,53 @@ class IPDModel(Model):
         self.ollama_model = ollama_model
         self.llm_out_file = llm_out_file
         self.debug = debug
+        self.extra_agent_classes = list(extra_agent_classes or [])
+        self.total_agents = self.N + len(self.extra_agent_classes)
 
-        # Distinct specs = SBM blocks (stable order)
-        specs = sorted(
-            agent_factory.probs,
-            key=lambda spec: (spec[0].__name__, spec[1]),
-        )
-        sizes = [int(round(agent_factory.probs[c] * N)) for c in specs]
+        base_plan = agent_factory.plan_agent_specs(self.N, self.random)
+        extra_specs = [(agent_cls, {}) for agent_cls in self.extra_agent_classes]
+        all_specs = base_plan + extra_specs
 
-        # Build SBM graph (nodes grouped by block).
-        num_agent_types = len(specs)
+        if not all_specs:
+            raise ValueError("Simulation must contain at least one agent")
+
+        labels = [self._agent_block_label(agent_cls) for agent_cls, _ in all_specs]
+        blocks: list[tuple[str, list[tuple[type, dict]]]] = []
+        for label in labels:
+            if not blocks or blocks[-1][0] != label:
+                blocks.append((label, []))
+        block_lists = {id(items): items for _, items in blocks}
+        block_index = 0
+        for spec in all_specs:
+            label = self._agent_block_label(spec[0])
+            while blocks[block_index][0] != label:
+                block_index += 1
+            block_lists[id(blocks[block_index][1])].append(spec)
+        grouped_specs = [items for _, items in blocks]
+
+        sizes = [len(group) for group in grouped_specs]
+
+        num_agent_types = len(grouped_specs)
         p = p_diff * np.ones((num_agent_types, num_agent_types))
         for i in range(num_agent_types):
             p[i][i] = p_same
         graph = nx.stochastic_block_model(sizes, p, seed=self.seed)
         self.network = Network(graph, random=self.random)
 
-        cells = self.network.all_cells.cells
-        idx = 0
+        cells = list(self.network.all_cells.cells)
         self.node_to_agent = {}
-        for (agent_cls, kwargs_items), sz in zip(specs, sizes):
-            init_kwargs = dict(kwargs_items)
-            for _ in range(sz):
+        self.custom_player_nodes: set[int] = set()
+        idx = 0
+        for group in grouped_specs:
+            for agent_cls, init_kwargs in group:
                 cell = cells[idx]
-                # Actually instantiate the agent.
                 agent = agent_cls(self, cell, **init_kwargs)
+                if agent_cls in self.extra_agent_classes:
+                    setattr(agent, "render_as_player_oval", True)
+                    self.custom_player_nodes.add(cell.coordinate)
                 self.node_to_agent[cell.coordinate] = agent
                 idx += 1
+
         self.agent_to_node = {
             agent: node
             for node, agent in self.node_to_agent.items()
@@ -82,25 +100,28 @@ class IPDModel(Model):
 
         self.datacollector = DataCollector(
             model_reporters={
-                "avg_payoff":
-                    lambda m: sum(a.wealth for a in m.agents) / len(m.agents),
+                "avg_payoff": lambda m: sum(a.wealth for a in m.agents) / len(m.agents),
                 "coop_rate": self._coop_rate,
-                "avg_degree":
-                    lambda m: (
-                        sum(dict(m.network.G.degree()).values())
-                        / m.network.G.number_of_nodes()
-                    )
+                "avg_degree": lambda m: (
+                    sum(dict(m.network.G.degree()).values())
+                    / m.network.G.number_of_nodes()
                     if m.network.G.number_of_nodes()
-                    else 0.0,
+                    else 0.0
+                ),
             }
         )
 
-        # Peace of mind that node IDs and agent IDs haven't drifted weirdly.
         assert set(self.node_to_agent.keys()) == set(self.network.G.nodes)
         assert all(a.node == n for n, a in self.node_to_agent.items())
 
         if self.llm_backend:
             self.llm_backend.ensure_ollama_running()
+
+    def _agent_block_label(self, agent_cls: type[IPDAgent]) -> str:
+        return agent_cls.__name__
+
+    def is_custom_player_node(self, node: int) -> bool:
+        return node in self.custom_player_nodes
 
     def assortativity(self) -> float:
         """
@@ -112,8 +133,7 @@ class IPDModel(Model):
         """
         nx.set_node_attributes(
             self.network.G,
-            {node: agent.__class__.__name__
-             for node, agent in self.node_to_agent.items()},
+            {node: agent.__class__.__name__ for node, agent in self.node_to_agent.items()},
             name="agent_type",
         )
         return nx.attribute_assortativity_coefficient(
@@ -131,8 +151,8 @@ class IPDModel(Model):
                     coop += 1
         return coop / total if total else 0.0
 
-    def step(self) -> None:
 
+    def step(self) -> None:
         # Reset agent state for this new round.
         for a in self.agents:
             a.current_iter_payment = 0
@@ -155,32 +175,15 @@ class IPDModel(Model):
         # Stuff happened, in case you care.
         self.datacollector.collect(self)
 
-    def _apply_llm_decisions(self, decisions_for_round):
-        """
-        Unpack this list:
-                [
-                    {"id": 0, "opponent": 3, "move": "C"},
-                    {"id": 0, "opponent": 1, "move": "D"},
-                    {"id": 1, "opponent": 2, "move": "D"},
-                    ...
-                ]
-        and add all that information to the agents' current_decisions dicts.
-        """
-        for d in decisions_for_round:
-            aid = int(d["id"])
-            oid = int(d["opponent"])
-            move = d["move"]
-            if move not in ("C", "D"):
-                raise ValueError(f"Invalid move from LLM: {move}")
-            if aid not in self.node_to_agent:
-                raise ValueError(f"Unknown agent id from LLM! {aid}")
-            if oid not in self.node_to_agent:
-                raise ValueError(f"Unknown opponent id from LLM! {oid}")
-            if oid not in set(self.network.G.neighbors(aid)):
-                raise ValueError(
-                    f"LLM gave non-neighbor opponent {oid} for agent {aid}!"
-                )
-            self.node_to_agent[aid].current_decisions[oid] = move
+        for a in self.agents:
+            a.current_iter_payment = 0
+            a.current_decisions.clear()
+
+        if self.debug:
+            print(
+                f"========== Agents running in iter {self.steps} "
+                f"of {self.num_iter} =========="
+            )
 
     def _run_agents(self) -> None:
         for a in self.agents:
@@ -193,50 +196,29 @@ class IPDModel(Model):
                 a.current_decisions[n], _ = output
 
     def _resolve_payoffs(self) -> None:
-        """
-        Resolve and commit all the information in the agents' current_decisions
-        dicts. For each one, determine the output of that round of the game
-        against the agent's opponent, award winnings, and record history.
-        """
         processed = set()
 
         for a in self.agents:
             i = a.node
-
             for j in self.network.G.neighbors(i):
-
                 if (j, i) in processed:
                     continue
-
                 b = self.node_to_agent[j]
-
                 move_i = a.current_decisions[j]
                 move_j = b.current_decisions[i]
-
                 payoff_i, payoff_j = self.payoff_matrix[(move_i, move_j)]
-
                 a.current_iter_payment += payoff_i
                 b.current_iter_payment += payoff_j
-
                 a.record_interaction(j, move_i, move_j)
                 b.record_interaction(i, move_j, move_i)
-
                 processed.add((i, j))
 
-        # Award the winnings, but scale by the node's degree. This is to avoid
-        # disadvantaging agents with fewer neighbors who of course therefore
-        # play fewer rounds and hence have lower winnings.
         for a in self.agents:
             k = self.network.G.degree[a.node]
             if k > 0:
                 a.wealth += a.current_iter_payment / k
 
     def _permit_rewiring(self) -> None:
-        """
-        Yes, there's an ordering issue here; whoever goes first can sever a
-        connection that that later agent won't have when it goes to rewire.
-        Oh well.
-        """
         self.agents.shuffle_do(
             "rewire_as_desired",
             self.payoff_matrix,
@@ -244,14 +226,6 @@ class IPDModel(Model):
         )
 
     def estimate_expected_avg_wealth(self):
-        """
-        Completely back-of-the-envelope estimate of "about how much should each
-        agent expect to win during this situation?" The crude formula assumes
-        an independent 50/50 chance of choosing to defect or cooperate. Note
-        that we compute "per_iter" here (not "per_encounter") because we're
-        discounting each agent's per-iteration winnings by its degree (which
-        is its number of encounters).
-        """
         avg_agent_per_iter = 0.25 * (
             self.payoff_matrix[("C", "C")][0]
             + self.payoff_matrix[("D", "C")][0]
@@ -261,9 +235,6 @@ class IPDModel(Model):
         return avg_agent_per_iter * self.num_iter
 
     def agent_mix(self) -> dict[str, int]:
-        """
-        Return counts of agents by concrete subclass name.
-        """
         return dict(
             Counter(agent.__class__.__name__ for agent in self.agents)
         )

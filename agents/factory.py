@@ -24,7 +24,6 @@ def register_agent(name: str) -> Callable[[T], T]:
 from .base import IPDAgent
 from .llm_agent import LLMAgent
 from .rule_based import TitForTatAgent, BrowserAgent
-from .stephen_agent import StephenAgent
 from .student_rule_based_template import StudentRuleBasedTemplate
 
 

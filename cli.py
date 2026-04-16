@@ -8,20 +8,23 @@ Iterated Prisoner's Dilemma on a Stochastic Block Model graph with:
 - Configurable homophily based on agent type
 
 Install:
-  pip install mesa networkx
+pip install mesa networkx
 Run syntax:
-  python pris.py -h
+python pris.py -h
 """
 from pathlib import Path
 import argparse
+import importlib.util
+import inspect
 import logging
+import sys
 from tqdm import tqdm
-from typing import List, Tuple
 
 import pandas as pd
 import matplotlib.pyplot as plt
 
 from model import IPDModel
+from agents.base import IPDAgent
 from agents.factory import AGENT_REGISTRY
 from llm.ollama_backend import OllamaBackend
 from agents.factory import AgentFactory
@@ -41,7 +44,7 @@ def parse_args():
     parser.add_argument(
         "N",
         type=int,
-        help="Number of agents",
+        help="Number of agents drawn from --agent-fracs",
     )
     parser.add_argument(
         "--T",
@@ -67,18 +70,27 @@ def parse_args():
         help="Sucker's payoff (def: 0)",
         default=0.0,
     )
+
     agent_types = [t for t in AGENT_REGISTRY]
     parser.add_argument(
         "--agent-fracs",
         nargs="+",
         metavar=("AGENT", "FRAC"),
-        default=["Sucker", 0.5, "Mean", 0.5],
+        default=["Sucker", "0.5", "Mean", "0.5"],
         help=(
             "Agent mix as pairs: AGENT FRAC AGENT FRAC ...\n"
             "AGENT is one of:\n"
-            + "".join(f"  - {agent_type}\n" for agent_type in agent_types)
+            + "".join(f" - {agent_type}\n" for agent_type in agent_types)
             + "Ex: --agent-fracs Sucker 0.4 Mean 0.4 Random 0.2\n"
             + "(def: Sucker 0.5, Mean 0.5)"
+        ),
+    )
+    parser.add_argument(
+        "--players",
+        type=str,
+        default=None,
+        help=(
+            "Dir of .py files with additional IPDAgent subclasses"
         ),
     )
     parser.add_argument(
@@ -190,30 +202,65 @@ def parse_args():
 
     if not args.T > args.R > args.P > args.S:
         raise ValueError("PD constraint #1 violated (T>R>P>S).")
-    if not 2*args.R > args.S + args.T:
+    if not 2 * args.R > args.S + args.T:
         raise ValueError("PD constraint #2 violated (2R>T+S).")
     if not (0.0 <= args.tft_noise <= 1.0):
         raise ValueError("--tft-noise must be between 0 and 1")
+    if args.players is not None and not Path(args.players).is_dir():
+        raise ValueError(f"--players must point to a directory: {args.players}")
 
     return args
 
 
-def interact_with_model(m: IPDModel):
+def _load_module_from_path(module_name: str, file_path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module spec for {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
+
+def load_player_classes(players_dir: str | None) -> list[type[IPDAgent]]:
+    if not players_dir:
+        return []
+
+    player_dir_path = Path(players_dir)
+    classes: list[type[IPDAgent]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for py_file in sorted(player_dir_path.glob("*.py")):
+        module_name = f"user_players_{py_file.stem}"
+        module = _load_module_from_path(module_name, py_file)
+
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if obj is IPDAgent:
+                continue
+            if not issubclass(obj, IPDAgent):
+                continue
+            if obj.__module__ != module.__name__:
+                continue
+
+            key = (obj.__module__, obj.__name__)
+            if key in seen:
+                continue
+            seen.add(key)
+            classes.append(obj)
+
+    return classes
+
+
+def interact_with_model(m: IPDModel):
     def node_prompt(m):
         return (
-            f"Enter node ({','.join([
-                str(n)
-                for n in sorted(m.network.G.nodes)
-            ])},"
+            f"Enter node ({','.join([str(n) for n in sorted(m.network.G.nodes)])},"
             "'done'): "
         )
 
     def neigh_prompt(m, n):
         neigh_list = ','.join([str(k) for k in m.network.G.neighbors(n)])
-        return (
-            f"  Enter neighbor of {n} ({neigh_list},'done'): "
-        )
+        return f" Enter neighbor of {n} ({neigh_list},'done'): "
 
     node_num_str = input(node_prompt(m))
     while node_num_str != "done" and node_num_str != "":
@@ -223,24 +270,24 @@ def interact_with_model(m: IPDModel):
         if neighs:
             print("Neighbors:")
             for neigh in neighs:
-                print(f"  - {m.node_to_agent[neigh]}")
-            node_num_str = input(neigh_prompt(m, n))
-            while node_num_str != "done":
-                neigh = int(node_num_str)
-                if neigh in m.network.G.neighbors(n):
-                    ncn = m.node_to_agent[neigh].__class__.__name__
-                    print(f"History with {ncn} {neigh}:")
-                    print(
-                        pd.DataFrame(m.node_to_agent[n].history[neigh]).rename(
-                            {
-                                'self_action': f'Node {n}',
-                                'other_action': f'Node {neigh}'
-                            }
-                        )
-                    )
-                else:
-                    print(f"  (Node {n} not adjacent to {neigh}.)")
+                print(f" - {m.node_to_agent[neigh]}")
                 node_num_str = input(neigh_prompt(m, n))
+                while node_num_str != "done":
+                    neigh = int(node_num_str)
+                    if neigh in m.network.G.neighbors(n):
+                        ncn = m.node_to_agent[neigh].__class__.__name__
+                        print(f"History with {ncn} {neigh}:")
+                        print(
+                            pd.DataFrame(m.node_to_agent[n].history[neigh]).rename(
+                                columns={
+                                    'self_action': f'Node {n}',
+                                    'other_action': f'Node {neigh}'
+                                }
+                            )
+                        )
+                    else:
+                        print(f" (Node {n} not adjacent to {neigh}.)")
+                    node_num_str = input(neigh_prompt(m, n))
 
         node_num_str = input(node_prompt(m))
 
@@ -266,9 +313,7 @@ def setup_runtime(args):
 
 
 if __name__ == "__main__":
-
     args = parse_args()
-
     setup_runtime(args)
 
     stats = []
@@ -286,6 +331,7 @@ if __name__ == "__main__":
     }
 
     factory = AgentFactory.instance(args.agent_fracs, args)
+    player_classes = load_player_classes(args.players)
 
     backend = OllamaBackend(
         model_name=args.ollama_model,
@@ -303,6 +349,7 @@ if __name__ == "__main__":
         p_diff=args.p_diff,
         num_iter=args.num_iter,
         agent_factory=factory,
+        extra_agent_classes=player_classes,
         max_rewires=args.max_rewires,
         give_rationales=args.give_rationales,
         llm_out_file=args.llm_out_file,
@@ -311,6 +358,7 @@ if __name__ == "__main__":
         debug=args.log,
         seed=args.seed,
     )
+
     print(f"Running {m}")
     print("Before simulation, agent-type adjacency:")
     print_agent_type_adjacency_matrix(m.network)
