@@ -1,3 +1,6 @@
+import subprocess
+import time
+from pathlib import Path
 import json
 import requests
 
@@ -17,8 +20,35 @@ class OllamaBackend:
         self.num_ctx = num_ctx
 
     def ensure_ollama_running(self) -> None:
-        r = requests.get(f"{self.host}/api/tags", timeout=5)
-        r.raise_for_status()
+        try:
+            r = requests.get(f"{self.host}/api/tags", timeout=2)
+            r.raise_for_status()
+            return
+        except requests.RequestException:
+            pass
+
+        log_path = Path("ollama.log")
+        with log_path.open("ab") as log:
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+            )
+
+        deadline = time.time() + 15
+        last_error = None
+
+        while time.time() < deadline:
+            try:
+                r = requests.get(f"{self.host}/api/tags", timeout=2)
+                r.raise_for_status()
+                return
+            except requests.RequestException as e:
+                last_error = e
+                time.sleep(0.5)
+
+        raise RuntimeError(f"Ollama did not start in time: {last_error}")
 
     def generate_text(
         self,
