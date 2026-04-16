@@ -145,11 +145,6 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--llm-rewiring-aware",
-        action="store_true",
-        help="LLMs make rewiring decisions? (def: false)",
-    )
-    parser.add_argument(
         "--give-rationales",
         action="store_true",
         help="Include rationales narrating moves in log files? (def: false)",

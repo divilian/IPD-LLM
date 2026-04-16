@@ -65,11 +65,9 @@ class LLMAgent(IPDAgent):
         self,
         model: Model,
         cell: Cell,
-        rewiring_aware: bool = False,
         backend: OllamaBackend | None = None,
     ):
         super().__init__(model, cell)
-        self.rewiring_aware = rewiring_aware
         self._pending_rewiring_plan = None
 
         if backend is not None:
@@ -99,17 +97,17 @@ CD -> {payoff_matrix['C', 'D'][0]}
 History against this opponent:
 {self.serialize_history(self.history, other.unique_id)}
 
-Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
+Rounds remaining including this one: {self.model.num_iter - self.model.steps + 1}
+
+Note: after this round, you will have an opportunity to sever up to
+{self.model.max_rewires} connections with current opponents and replace each
+one with a friend-of-a-friend.
 
 Choose your next move.
 """
 
-        if self.rewiring_aware:
-            prompt += (
-                "\nAfter this round, you may have an opportunity to sever connections "
-                "with current opponents and have them replaced with new opponents drawn "
-                "from your friends-of-friends.\n"
-            )
+        prompt += (
+        )
 
         return prompt
 
@@ -205,6 +203,9 @@ Available candidate new neighbors:
         max_rewires: int,
         give_rationale: bool = False,
     ) -> dict:
+        with open(self.model.llm_out_file, "a", encoding="utf-8") as f:
+            print("---------------------------------------------------", file=f)
+            print("PLANNNING REWIRING", file=f)
         prompt = self.build_rewiring_prompt(
             starting_neighbors=starting_neighbors,
             new_neighbor_candidates=new_neighbor_candidates,
@@ -260,8 +261,6 @@ Available candidate new neighbors:
         new_neighbor_candidates: set[int],
         max_rewires: int,
     ) -> list[int]:
-        if not self.rewiring_aware:
-            return []
 
         self._pending_rewiring_plan = self._plan_rewiring_once(
             starting_neighbors=starting_neighbors,
@@ -278,8 +277,6 @@ Available candidate new neighbors:
         severed_nodes: set[int],
         starting_neighbors: set[int],
     ) -> list[int]:
-        if not self.rewiring_aware:
-            return []
 
         if self._pending_rewiring_plan is None:
             raise RuntimeError(

@@ -36,13 +36,11 @@ class StudentLLMTemplate(LLMAgent):
         self,
         model: Model,
         cell: Cell,
-        rewiring_aware: bool = False,
         backend=None,
     ):
         super().__init__(
             model=model,
             cell=cell,
-            rewiring_aware=rewiring_aware,
             backend=backend,
         )
 
@@ -73,30 +71,8 @@ class StudentLLMTemplate(LLMAgent):
         - Should it forgive sometimes?
         - How should it use the number of remaining turns?
         """
-        prompt = f"""You are playing an iterated prisoner's dilemma.
+        return "It is a beautiful day outside. Respond with one letter: C."
 
-Payoffs to you:
-CC -> {payoff_matrix['C', 'C'][0]}
-DD -> {payoff_matrix['D', 'D'][0]}
-DC -> {payoff_matrix['D', 'C'][0]}
-CD -> {payoff_matrix['C', 'D'][0]}
-
-History against this opponent:
-{self.serialize_history(self.history, other.unique_id)}
-
-Turns remaining including this one: {self.model.num_iter - self.model.steps + 1}
-
-Choose your next move.
-"""
-
-        if self.rewiring_aware:
-            prompt += (
-                "\nAfter this round, you may have an opportunity to sever connections "
-                "with current opponents and have them replaced with new opponents drawn "
-                "from your friends-of-friends.\n"
-            )
-
-        return prompt
 
     def build_rewiring_prompt(
         self,

@@ -47,10 +47,6 @@ def resolve_agent_spec(
         return TitForTatAgent, {"noise": args.tft_noise}
     if name == "Browser":
         return BrowserAgent, {"tft_noise": args.tft_noise, "patience":3}
-    if name == "LLM":
-        return LLMAgent, {
-            "rewiring_aware": args.llm_rewiring_aware,
-        }
 
     try:
         return AGENT_REGISTRY[name], {}
