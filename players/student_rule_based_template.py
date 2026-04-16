@@ -1,5 +1,5 @@
-from .base import IPDAgent
-from .factory import register_agent
+from agents.base import IPDAgent
+from agents.factory import register_agent
 
 @register_agent("StudentRuleBasedTemplate")
 class StudentRuleBasedTemplate(IPDAgent):
