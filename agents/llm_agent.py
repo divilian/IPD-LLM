@@ -53,7 +53,6 @@ class LLMAgent(IPDAgent):
     This is intended to be a student's starting point:
     - generic prompt structure
     - generic rewiring workflow
-    - no especially opinionated strategy beyond "make a choice given the game state"
 
     Subclasses may override:
     - system_prompt()
@@ -76,40 +75,14 @@ class LLMAgent(IPDAgent):
             self.backend = OllamaBackend(self.model.ollama_model)
 
     def system_prompt(self) -> str | None:
-        return (
-            "You are an agent in an iterated prisoner's dilemma simulation. "
-            "Read the game state carefully and return a valid answer that matches the requested format."
-        )
+        raise NotImplementedError
 
     def build_decision_prompt(
         self,
         other: "IPDAgent",
         payoff_matrix: dict[tuple[str, str], tuple[str, str]],
     ) -> str:
-        prompt = f"""You are playing an iterated prisoner's dilemma.
-
-Payoffs to you:
-CC -> {payoff_matrix['C', 'C'][0]}
-DD -> {payoff_matrix['D', 'D'][0]}
-DC -> {payoff_matrix['D', 'C'][0]}
-CD -> {payoff_matrix['C', 'D'][0]}
-
-History against this opponent:
-{self.serialize_history(self.history, other.unique_id)}
-
-Rounds remaining including this one: {self.model.num_iter - self.model.steps + 1}
-
-Note: after this round, you will have an opportunity to sever up to
-{self.model.max_rewires} connections with current opponents and replace each
-one with a friend-of-a-friend.
-
-Choose your next move.
-"""
-
-        prompt += (
-        )
-
-        return prompt
+        raise NotImplementedError
 
     def build_rewiring_prompt(
         self,
@@ -118,41 +91,7 @@ Choose your next move.
         max_rewires: int,
         give_rationale: bool,
     ) -> str:
-        current_neighbor_lines = []
-        for node in sorted(starting_neighbors):
-            hist = self.serialize_history(self.history, node + 1)
-            current_neighbor_lines.append(f"- node={node}\n{hist}")
-
-        current_neighbor_text = (
-            "\n".join(current_neighbor_lines) if current_neighbor_lines else "(none)"
-        )
-
-        candidate_lines = []
-        for node in sorted(new_neighbor_candidates):
-            mutual_contacts = sorted(starting_neighbors & self._get_neighbors_of_node(node))
-            candidate_lines.append(
-                f"- node={node}, mutual_contacts={mutual_contacts}"
-            )
-
-        candidate_text = "\n".join(candidate_lines) if candidate_lines else "(none)"
-
-        prompt = f"""You are deciding how to rewire your social network in a networked iterated prisoner's dilemma.
-
-You may sever up to {max_rewires} current neighbors and add up to {max_rewires} new neighbors.
-
-Current neighbors and your history against each:
-{current_neighbor_text}
-
-Available candidate new neighbors:
-{candidate_text}
-"""
-
-        if give_rationale:
-            prompt += "\nInclude a brief reason."
-        else:
-            prompt += "\nDo not include a reason."
-
-        return prompt
+        raise NotImplementedError
 
     def decide_against(
         self,
@@ -203,9 +142,6 @@ Available candidate new neighbors:
         max_rewires: int,
         give_rationale: bool = False,
     ) -> dict:
-        with open(self.model.llm_out_file, "a", encoding="utf-8") as f:
-            print("---------------------------------------------------", file=f)
-            print("PLANNNING REWIRING", file=f)
         prompt = self.build_rewiring_prompt(
             starting_neighbors=starting_neighbors,
             new_neighbor_candidates=new_neighbor_candidates,
@@ -224,11 +160,23 @@ Available candidate new neighbors:
         add_ids = resp.get("add_ids", [])
         reason = resp.get("reason", "(none)")
 
-        if not isinstance(drop_ids, list) or not all(isinstance(x, str) for x in drop_ids):
+        if (
+            not isinstance(drop_ids, list) or
+            not all(isinstance(x, str) for x in drop_ids)
+        ):
             raise ValueError(f"Invalid drop_ids returned by LLM: {drop_ids!r}")
 
-        if not isinstance(add_ids, list) or not all(isinstance(x, str) for x in add_ids):
+        if (
+            not isinstance(add_ids, list) or
+            not all(isinstance(x, str) for x in add_ids)
+        ):
             raise ValueError(f"Invalid add_ids returned by LLM: {add_ids!r}")
+
+        if len(drop_ids) != len(add_ids):
+            raise ValueError(
+                f"LLM returned {len(drop_ids)} drop ids but only "
+                f"{len(add_ids)} add ids!"
+            )
 
         allowed_drop_ids = {str(node) for node in starting_neighbors}
         allowed_add_ids = {str(node) for node in new_neighbor_candidates}

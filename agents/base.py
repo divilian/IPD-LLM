@@ -177,9 +177,11 @@ class IPDAgent(CellAgent):
         Each value is a list of dicts with keys 'step' (the round number),
         'self_move', and 'other_move'.
 
-        Note that it is perfectly permissible to lie about this history, if you
-        deem that advantageous. You can also return None to give the inquirer
-        the hand.
+        Such a history is trivially obtainable simply by accessing your own
+        self.history. However, note that it is perfectly permissible -- and
+        perhaps advantageous -- to lie about this history instead. If you do
+        so, you will incur a cost. You can also return None to give the
+        inquirer the hand. This also incurs a cost.
         """
         return self.history
 

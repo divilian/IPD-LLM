@@ -24,12 +24,15 @@ class StudentLLMTemplate(LLMAgent):
     - system_prompt()
     - build_decision_prompt()
     - optionally build_rewiring_prompt()
+    - optionally inform_foaf()
 
     A good workflow is:
     1. Start by editing build_decision_prompt().
     2. Run experiments and observe behavior.
     3. If your simulation includes rewiring, then edit build_rewiring_prompt().
-    4. If you want a stronger overall "persona" or objective, edit system_prompt().
+    4. If you want to lie or withhold information to others, then edit
+        inform_foaf().
+    5. If you want a stronger overall "persona," edit system_prompt().
     """
 
     def __init__(
@@ -46,15 +49,10 @@ class StudentLLMTemplate(LLMAgent):
 
     def system_prompt(self) -> str | None:
         """
-        Optional: give the LLM a stable overall role or objective.
-
         Keep this fairly short. Put most of your strategy-specific instructions
         in build_decision_prompt() and build_rewiring_prompt().
         """
-        return (
-            "You are an agent in an iterated prisoner's dilemma simulation. "
-            "Read the game state carefully and return a valid answer matching the requested format."
-        )
+        raise NotImplementedError
 
     def build_decision_prompt(
         self,
@@ -71,8 +69,7 @@ class StudentLLMTemplate(LLMAgent):
         - Should it forgive sometimes?
         - How should it use the number of remaining turns?
         """
-        return "It is a beautiful day outside. Respond with one letter: C."
-
+        raise NotImplementedError
 
     def build_rewiring_prompt(
         self,
@@ -87,40 +84,30 @@ class StudentLLMTemplate(LLMAgent):
         If you do not want to change rewiring behavior yet, you can leave this
         method alone and just focus on build_decision_prompt() first.
         """
-        current_neighbor_lines = []
-        for node in sorted(starting_neighbors):
-            hist = self.serialize_history(self.history, node + 1)
-            current_neighbor_lines.append(f"- node={node}\n{hist}")
-
-        current_neighbor_text = (
-            "\n".join(current_neighbor_lines) if current_neighbor_lines else "(none)"
-        )
-
-        candidate_lines = []
-        for node in sorted(new_neighbor_candidates):
-            mutual_contacts = sorted(starting_neighbors & self._get_neighbors_of_node(node))
-            candidate_lines.append(
-                f"- node={node}, mutual_contacts={mutual_contacts}"
-            )
-
-        candidate_text = "\n".join(candidate_lines) if candidate_lines else "(none)"
-
-        prompt = f"""You are deciding how to rewire your social network in a networked iterated prisoner's dilemma.
-
-You may sever up to {max_rewires} current neighbors and add up to {max_rewires} new neighbors.
-
-Current neighbors and your history against each:
-{current_neighbor_text}
-
-Available candidate new neighbors:
-{candidate_text}
-
-Choose which current neighbors to drop and which candidate neighbors to add.
-"""
-
         if give_rationale:
-            prompt += "\nInclude a brief reason."
+            return """
+                Output exactly this JSON document:
+                {'drop_ids':[], 'add_ids':[], 'reason':"I felt like it."}
+            """
         else:
-            prompt += "\nDo not include a reason."
+            return """
+                Output exactly this JSON document:
+                {'drop_ids':[], 'add_ids':[]}
+            """
 
-        return prompt
+    def inform_foaf(
+        self,
+        inquirer: "IPDAgent",
+    ) -> dict[int, list[dict[str, int | str]]] | None:
+        """
+        Return a reported interaction history keyed by opponent node number.
+        Each value is a list of dicts with keys 'step' (the round number),
+        'self_move', and 'other_move'.
+
+        Such a history is trivially obtainable simply by accessing your own
+        self.history. However, note that it is perfectly permissible -- and
+        perhaps advantageous -- to lie about this history instead. If you do
+        so, you will incur a cost. You can also return None to give the
+        inquirer the hand. This also incurs a cost.
+        """
+        return self.history

@@ -230,7 +230,10 @@ def load_player_classes(players_dir: str | None) -> list[type[IPDAgent]]:
     classes: list[type[IPDAgent]] = []
     seen: set[tuple[str, str]] = set()
 
-    for py_file in sorted(player_dir_path.glob("*.py")):
+    for py_file in sorted(
+        f for f in player_dir_path.glob("*.py")
+        if "template" not in f.name
+    ):
         module_name = f"user_players_{py_file.stem}"
         module = _load_module_from_path(module_name, py_file)
 
