@@ -1,22 +1,26 @@
 from collections.abc import Callable
-from typing import TypeVar
+from typing import TypeVar, Type
 import argparse
 import math
 from dataclasses import dataclass
 from collections.abc import Mapping
 import random as py_random  # using only Mesa's rng; this is for a type hint
 
-T = TypeVar("T")
-
 
 AGENT_REGISTRY: dict[str, type] = {}
 
-def register_agent(name: str) -> Callable[[T], T]:
+def register_agent(
+    display_name: str,
+) -> Callable[[Type["IPDAgent"]], Type["IPDAgent"]]:
     """
     Decorator for new Agent IPDsubclasses.
     """
-    def decorator(cls: T) -> T:
-        AGENT_REGISTRY[name] = cls
+    def decorator(cls: Type["IPDAgent"]) -> Type["IPDAgent"]:
+        if display_name in AGENT_REGISTRY:
+            raise ValueError(f"Duplicate agent name: {display_name}")
+
+        AGENT_REGISTRY[display_name] = cls
+        cls.display_name = display_name
         return cls
     return decorator
 

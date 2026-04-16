@@ -426,6 +426,13 @@ class IPDAgent(CellAgent):
     def node(self) -> int:
         return self.cell.coordinate
 
+    display_name = None
+    @classmethod
+    def name(cls) -> str:
+        if cls.display_name is not None:
+            return cls.display_name
+        return cls.__name__
+
     def __str__(self) -> str:
         return (
             f"Node {self.node} (agent id {self.unique_id}) "
