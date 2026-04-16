@@ -371,7 +371,7 @@ if __name__ == "__main__":
             m,
             plot_context,
             monies,
-            t,
+            0,
             args.num_iter,
             interactive=args.plot_interactive,
         )
