@@ -364,10 +364,21 @@ if __name__ == "__main__":
     print_agent_type_adjacency_matrix(m.network)
 
     if args.plot:
+        # Plot once before any simulation steps.
         plot_context = setup_plotting(m, interactive=args.plot_interactive)
+        monies = [m.node_to_agent[n].wealth for n in m.network.G.nodes]
+        plot(
+            m,
+            plot_context,
+            monies,
+            t,
+            args.num_iter,
+            interactive=args.plot_interactive,
+        )
 
     for t in tqdm(range(args.num_iter)):
         m.step()
+        # Then, plot after each step.
         monies = [m.node_to_agent[n].wealth for n in m.network.G.nodes]
         if args.plot:
             plot(
