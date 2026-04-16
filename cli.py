@@ -182,6 +182,11 @@ def parse_args():
         help="Show plot live instead of writing plot.mp4",
     )
     parser.add_argument(
+        "--plot-time-series",
+        action="store_true",
+        help="Plot time series data at simulation end."
+    )
+    parser.add_argument(
         "--analyze",
         action="store_true",
         help="Launch interactive node analyzer",
@@ -373,6 +378,9 @@ if __name__ == "__main__":
 
     for t in tqdm(range(args.num_iter)):
         m.step()
+        row = {"step": t + 1}
+        row.update(per_agent_type_stats(m))
+        stats.append(row)
         # Then, plot after each step.
         monies = [m.node_to_agent[n].wealth for n in m.network.G.nodes]
         if args.plot:
@@ -384,15 +392,12 @@ if __name__ == "__main__":
                 args.num_iter,
                 interactive=args.plot_interactive,
             )
-        row = {"step": t + 1}
-        row.update(per_agent_type_stats(m))
-        stats.append(row)
 
     print("After simulation, agent-type adjacency:")
     print_agent_type_adjacency_matrix(m.network)
 
     stats = pd.DataFrame(stats)
-    print_stats(stats)
+    print_stats(stats, 20, args.plot_time_series)
 
     if args.plot:
         if args.plot_interactive:

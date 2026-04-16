@@ -1,6 +1,7 @@
 from collections import defaultdict
 from typing import Type
 import re
+import matplotlib.pyplot as plt
 
 import pandas as pd
 from mesa.discrete_space import CellAgent
@@ -174,20 +175,30 @@ def print_stats(stats: pd.DataFrame, last_n=20, plot_means=False):
 
     cols = stats.columns
 
-    things = sorted({
+    coops = sorted({
         re.sub(r"(Coop|\$)$", "", c)
         for c in cols
-        if c.endswith("Coop") or c.endswith("$")
+        if c.endswith("Coop")
     })
 
-    ordered = (
-        [f"{t}Coop" for t in things if f"{t}Coop" in cols] +
-        [f"{t}$"    for t in things if f"{t}$"    in cols]
+    monies = sorted({
+        re.sub(r"(Coop|\$)$", "", c)
+        for c in cols
+        if c.endswith("$")
+    })
+
+    ordered_coops = (
+        [f"{t}Coop" for t in coops if f"{t}Coop" in cols]
     )
 
-    other = [c for c in cols if c not in ordered]
+    ordered_monies = (
+        [f"{t}$" for t in monies if f"{t}$" in cols]
+    )
 
-    stats = stats[other + ordered]
+    other = [c for c in cols if c not in ordered_coops and c not in ordered_monies]
+
+    stats_coop = stats[other + ordered_coops]
+    stats_monies = stats[other + ordered_monies]
 
     with pd.option_context(
         "display.width", None,
@@ -195,8 +206,15 @@ def print_stats(stats: pd.DataFrame, last_n=20, plot_means=False):
         "display.max_colwidth", None,
         "display.expand_frame_repr", False,
     ):
-        print(stats.tail(last_n))
+        print(stats_coop.tail(last_n))
+        print(stats_monies.tail(last_n))
 
     if plot_means:
-        to_plot = stats[[f"{t}$"    for t in things if f"{t}$"    in cols]]
-        to_plot.plot(kind="line")
+        fig, axes = plt.subplots(nrows=2,ncols=1,figsize=(16,8),sharex=True)
+        coops_to_plot = stats[[f"{t}Coop"    for t in coops if f"{t}Coop"    in cols]]
+        monies_to_plot = stats[[f"{t}$"    for t in monies if f"{t}$"    in cols]]
+        coops_to_plot.plot(kind="line",ax=axes[0])
+        axes[0].set_ylim(-.1,1.1)
+        monies_to_plot.plot(kind="line",ax=axes[1])
+        fig.savefig("coops_and_monies.svg")
+        print("Time series plots saved in coops_and_monies.svg.")

@@ -175,10 +175,6 @@ class IPDModel(Model):
         # Stuff happened, in case you care.
         self.datacollector.collect(self)
 
-        for a in self.agents:
-            a.current_iter_payment = 0
-            a.current_decisions.clear()
-
         if self.debug:
             print(
                 f"========== Agents running in iter {self.steps} "
