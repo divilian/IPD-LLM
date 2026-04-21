@@ -99,7 +99,7 @@ class TitForTatAgent(IPDAgent):
             choice = self.model.random.choice(["C", "D"])
             return choice, f"It's my first time! ({choice})."
 
-        if random.random() < noise:
+        if self.model.random.random() < self.noise:
             choice = self.model.random.choice(["C", "D"])
             return choice, f"I'm going random ({choice})."
 

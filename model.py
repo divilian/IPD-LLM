@@ -196,7 +196,7 @@ class IPDModel(Model):
         for a in self.agents:
             for n in self.network.G.neighbors(a.node):
                 output = a.decide_against(
-                    self.node_to_agent[n],
+                    n,
                     give_rationale=self.give_rationales
                 )
                 a.current_decisions[n], _ = output
