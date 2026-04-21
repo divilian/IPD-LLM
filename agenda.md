@@ -1,5 +1,9 @@
 # Prisoner's Dilemma agenda
 
+## Student-competition-related
+
+1. Actually charge `inform_foaf()` costs.
+
 ## SCC paper related
 
 ### Prompt Ablations

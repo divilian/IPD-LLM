@@ -15,14 +15,13 @@ class SuckerAgent(IPDAgent):
 
     def decide_against(
         self,
-        other: "IPDAgent",
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        other: int,
         give_rationale: bool,
     ) -> tuple[str, str]:
         if give_rationale:
             log = (
                 f"I'm node {self.node} (Sucker), interacting with "
-                "{other.node}. (C'ing as always.)"
+                "{other}. (C'ing as always.)"
             )
         else:
             log = ""
@@ -41,15 +40,14 @@ class RandomAgent(IPDAgent):
 
     def decide_against(
         self,
-        other: "IPDAgent",
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        other: int,
         give_rationale: bool,
     ) -> tuple[str, str]:
         move = self.model.random.choice(['C','D'])
         if give_rationale:
             log = (
                 f"I'm node {self.node} (Random), interacting with "
-                "{other.node}. Choosing to {move} this time."
+                "{other}. Choosing to {move} this time."
             )
         else:
             log = ""
@@ -68,14 +66,13 @@ class MeanAgent(IPDAgent):
 
     def decide_against(
         self,
-        other: "IPDAgent",
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        other: int,
         give_rationale: bool,
     ) -> tuple[str, str]:
         if give_rationale:
             log = (
                 f"I'm node {self.node} (Mean), interacting with "
-                "{other.node}. (D'ing as always.)"
+                "{other}. (D'ing as always.)"
             )
         else:
             log = ""
@@ -84,34 +81,6 @@ class MeanAgent(IPDAgent):
     def shape(self) -> str:
         return "v"   # Down triangle = "mean/aggressive"
 
-
-def tft_algorithm(
-    h: dict[int, list[dict[str, int | str]]] | None,
-    other_node: int,
-    prelude: str,
-    random: "Random",
-    noise: float=0.0,
-) -> tuple[str, str]:
-    """
-    Perform the prototypical TitForTat algorithm against an opponent with the
-    given history against them.
-    """
-    log = prelude
-    if not h:
-        choice = random.choice(["C", "D"])
-        log += f"It's my first time! ({choice})."
-        return choice, log
-
-    if random.random() < noise:
-        choice = random.choice(["C", "D"])
-        log += f"I'm going random ({choice})."
-        return choice, log
-
-    log += (
-        f"\n  Last time node {other_node} {h[-1]['other_move']}'d "
-        + f"against me. So I'm {h[-1]['other_move']}'ing them this time."
-    )
-    return h[-1]["other_move"], log
 
 @register_agent("TFT")
 class TitForTatAgent(IPDAgent):
@@ -123,30 +92,39 @@ class TitForTatAgent(IPDAgent):
 
     def decide_against(
         self,
-        other: "IPDAgent",
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        other: int,
         give_rationale: bool,
     ) -> tuple[str, str]:
-        prelude = f"I'm node {self.node} (TFT), interacting with {other.node}. "
-        h = self.history[other.node]
-        output = tft_algorithm(
-            h,
-            other.node,
-            prelude,
-            self.random,
-            self.noise,
-        )
+        if other not in self.history:
+            choice = self.model.random.choice(["C", "D"])
+            return choice, f"It's my first time! ({choice})."
+
+        if random.random() < noise:
+            choice = self.model.random.choice(["C", "D"])
+            return choice, f"I'm going random ({choice})."
+
+        their_last_move = self.history[other][-1]['other_move']
+
         if give_rationale:
-            return output
+            agent_type = self.__class__.__name__.replace("Agent", "")
+            return (
+                their_last_move,
+                (
+                    f"I'm node {self.node} ({agent_type}), "
+                    f"interacting with {other}.\n"
+                    f"Last time node {other} {their_last_move}'d against "
+                    f"me. So I'm {their_last_move}'ing against them now."
+                ),
+            )
         else:
-            return output[0], ""
+            return their_last_move, ""
 
     def shape(self) -> str:
         return "s"   # Square = "rule-based/fair/predictable"
 
 
 @register_agent("Browser")
-class BrowserAgent(IPDAgent):
+class BrowserAgent(TitForTatAgent):
     """
     Tit-for-Tats, and breaks contact with uncooperative opponents, replacing
     them with random FOAFs.
@@ -164,54 +142,68 @@ class BrowserAgent(IPDAgent):
         patience: the number of consecutive D's by the opponent that this
         agent will tolerate before severing the connection and going shopping.
         """
-        super().__init__(model, cell)
-        self.tft_noise = tft_noise
+        super().__init__(model, cell, tft_noise)
         self.patience = patience
+        self.known_non_neighbors = []
 
-    def decide_against(
+    def request_rewire(
         self,
-        other: "IPDAgent",
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-        give_rationale: bool,
-    ) -> tuple[str, str]:
-        prelude = (
-            f"I'm node {self.node} (Browser), interacting with {other.node}. "
-        )
-        h = self.history[other.node]
-        output = tft_algorithm(
-            h,
-            other.node,
-            prelude,
-            self.random,
-            self.tft_noise,
-        )
-        if give_rationale:
-            return output
-        else:
-            return output[0], ""
-        
-    def choose_neighbors_to_sever(
-        self,
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-        starting_neighbors: set[int],
-        new_neighbor_candidates: set[int],
         max_rewires: int,
-    ) -> list[int]:
+    ) -> dict[str, list[int]]:
         """
         BrowserAgent policy: anyone who's defected a lot recently gets the axe.
+        Pick random eligible FOAFs as replacements.
         """
-        sever_targets: list[int] = []
+        sever_targets = []
 
         for node, history in self.history.items():
             if (
-                node in starting_neighbors
+                node in self.model.network.G.neighbors(self.node)
                 and self._has_defected_too_often(history)
+                and len(sever_targets) < max_rewires
             ):
                 sever_targets.append(node)
 
-        if sever_targets and self.model.debug:
-            print(f"Severing from {sever_targets}")
-        return sever_targets
+        new_targets = self._select_up_to_n_new_targets(len(sever_targets))
+        sever_targets = sever_targets[:len(new_targets)]
+
+        return { 'nodes_to_sever': sever_targets, 'nodes_to_add': new_targets }
+
+    def _select_up_to_n_new_targets(self, n: int):
+
+        neighbors_left_to_ask = self.neighbors()
+        new_targets = []
+        # First, let's add nodes that I know about but which are known not to
+        # be my neighbors. That's free.
+        while (
+            len(new_targets) < n and
+            len(self.known_non_neighbors) >= 1
+        ):
+            new_targets.append(self.known_non_neighbors.pop(
+                self.random.randrange(len(self.known_non_neighbors))
+            ))
+
+        # Now if that resulted in enough additions, great; yeet 'em outta here.
+        if len(new_targets) == n:
+            return new_targets
+
+        # Otherwise, I guess we ought to ask around.
+        neighbors_left_to_ask = self.neighbors()
+        while (
+            len(new_targets) < n and
+            len(neighbors_left_to_ask) >= 1
+        ):
+            possible_targets = \
+                [ k for k in self.model.request_foaf_info_from(self,
+                    neighbors_left_to_ask.pop(
+                        self.random.randrange(len(neighbors_left_to_ask))
+                    )
+                )
+            ]
+            new_targets += possible_targets[:n-len(new_targets)]
+
+        # Whether or not we actually have enough, that's all we got.
+        return new_targets
 
     def _has_defected_too_often(self, other_history):
         """
@@ -220,39 +212,10 @@ class BrowserAgent(IPDAgent):
         interactions in the history, return False.
         """
         if len(other_history) < self.patience:
-            if self.model.debug:
-                print(f"Not enough history to know whether to ditch this friend.")
             return False
 
         recent = other_history[-self.patience :]
-        answer = all(move["other_move"] == "D" for move in recent)
-        if answer:
-            if self.model.debug:
-                print(f"Ditch this guy!")
-        else:
-            if self.model.debug:
-                print(f"Stay friends with this guy.")
         return all(move["other_move"] == "D" for move in recent)
-
-    def choose_new_neighbors(
-        self,
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-        eligible_new_neighbors: set[int],
-        num_needed_replacements: int,
-        severed_nodes: set[int],
-        starting_neighbors: set[int],
-    ) -> list[int]:
-        """
-        BrowserAgent policy: pick random eligible FOAFs as replacements.
-        """
-        if not eligible_new_neighbors or num_needed_replacements <= 0:
-            return []
-
-        candidates = list(eligible_new_neighbors)
-        self.model.random.shuffle(candidates)
-        if candidates and self.model.debug:
-            print(f"Connecting to {candidates[:num_needed_replacements]}")
-        return candidates[:num_needed_replacements]
 
     def shape(self) -> str:
         return "<"   # Triangle sideways = "shopping around"

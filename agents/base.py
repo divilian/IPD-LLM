@@ -12,187 +12,151 @@ class IPDAgent(CellAgent):
         - decide_against()
 
     Optional overrides:
-        - choose_neighbors_to_sever()
-        - choose_new_neighbors()
         - inform_foaf()
-        - shape()
-        - size()
-
-    Notice there is no ".step()" method, here or in subclasses, as is
-    traditional in Mesa. We instead require ".decide_against()" for each
-    subclass.
+        - rewire_as_desired()
     """
-    def __init__(self, model: Model, cell: Cell):
+
+    def __init__(
+        self,
+        model: Model,
+        cell: Cell,
+    ):
         super().__init__(model)
         self.cell = cell
+
         self.current_iter_payment = 0
 
         # history[other_node] = list of {step, self_move, other_move}
         self.history = defaultdict(list)
 
         # current_decisions[other_node] = move for THIS step only
-        self.current_decisions = {}
+        self.__current_decisions = {}
 
         self.wealth = 0.0
+
 
     """
     OVERRIDABLE METHODS FOR SUBCLASSES
     """
     def decide_against(
         self,
-        other: "IPDAgent",
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
+        other: int,
         give_rationale: bool,
     ) -> tuple[str, str]:
         """
-        Make a decision against another agent. Return your decision ("C" or
-        "D") and, if give_rationale is True, a description of the interaction
-        (for logging). (If give_rationale is False, agents must still return an
-        empty string as the second element of the returned tuple, for
-        simplicity.)
+        Make a decision against another agent (whose node number is passed).
+        Return your decision ("C" or "D") and, if give_rationale is True, a
+        description of the interaction (for logging). (If give_rationale is
+        False, agents must still return a second value as the second element
+        of the returned tuple, for simplicity.)
+
+        So, to be concrete, this is a legal return value:
+
+        return "C", ""
         """
         raise NotImplementedError
 
-    def rewire_as_desired(
-        self,
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-        max_rewires: int,
-    ) -> None:
-        """
-        Optionally do the following:
-        (1) Sever up to max_rewires graph connections to agents you no longer
-        want to play with.
-        (2) For each such severance, form a new connection to another agent.
-        You can discover these by asking your neighbors for information via
-        `.inform_foaf()`.
-
-        This uses the Template Method pattern. Subclasses may override hook
-        methods like `choose_neighbors_to_sever()` and `choose_new_neighbors()`
-        to control rewiring policy, or override this entire method if they need
-        a completely different rewiring algorithm.
-        """
-        if self.model.debug:
-            print(
-                "***************************************\n"
-                f"{self.unique_id} (node {self.node}) is considering rewiring"
-            )
-
-        current_neighbors = self._get_current_neighbors()
-        my_foafs = self._get_foaf_nodes()
-        new_neighbor_candidates = self._get_eligible_new_neighbor_candidates(
-            candidate_nodes=my_foafs,
-            starting_neighbors=current_neighbors,
-            severed_nodes=set(),
-        )
-
-        sever_targets = self.choose_neighbors_to_sever(
-            payoff_matrix=payoff_matrix,
-            starting_neighbors=current_neighbors,
-            new_neighbor_candidates=new_neighbor_candidates,
-            max_rewires=max_rewires,
-        )
-
-        sever_targets = self._sanitize_sever_targets(
-            sever_targets=sever_targets,
-            current_neighbors=current_neighbors,
-            max_rewires=max_rewires,
-        )
-
-        severed_nodes = self._actually_sever_connections(sever_targets)
-        num_needed_replacements = len(severed_nodes)
-
-        if self.model.debug:
-            if num_needed_replacements:
-                print(
-                    f"I've terminated {num_needed_replacements} "
-                    "connections, and will now try to make that many more."
-                )
-            else:
-                print("Nobody terminated; no need to make more connections.")
-
-        if not num_needed_replacements:
-            return
-
-        eligible_new_neighbors = self._get_eligible_new_neighbor_candidates(
-            candidate_nodes=my_foafs,
-            starting_neighbors=current_neighbors,
-            severed_nodes=severed_nodes,
-        )
-
-        chosen_new_neighbors = self.choose_new_neighbors(
-            payoff_matrix=payoff_matrix,
-            eligible_new_neighbors=eligible_new_neighbors,
-            num_needed_replacements=num_needed_replacements,
-            severed_nodes=severed_nodes,
-            starting_neighbors=current_neighbors,
-        )
-
-        chosen_new_neighbors = self._sanitize_new_neighbor_choices(
-            chosen_new_neighbors=chosen_new_neighbors,
-            eligible_new_neighbors=eligible_new_neighbors,
-            num_needed_replacements=num_needed_replacements,
-        )
-
-        self._actually_add_new_connections(chosen_new_neighbors)
-
-    def choose_neighbors_to_sever(
-        self,
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-        starting_neighbors: set[int],
-        new_neighbor_candidates: set[int],
-        max_rewires: int,
-    ) -> list[int]:
-        """
-        Hook method.
-
-        Return a list of neighbor node IDs that this agent wants to sever.
-        Default behavior: no rewiring.
-        """
-        return []
-
-    def choose_new_neighbors(
-        self,
-        payoff_matrix: dict[tuple[str, str], tuple[str, str]],
-        eligible_new_neighbors: set[int],
-        num_needed_replacements: int,
-        severed_nodes: set[int],
-        starting_neighbors: set[int],
-    ) -> list[int]:
-        """
-        Hook method.
-
-        Return a list of node IDs to connect to.
-        Default behavior: choose uniformly at random from eligible new neighbors.
-        """
-        eligible = list(eligible_new_neighbors)
-        self.model.random.shuffle(eligible)
-        return eligible[:num_needed_replacements]
 
     def inform_foaf(
         self,
-        inquirer: "IPDAgent",
-    ) -> dict[int, list[dict[str, int | str]]] | None:
+        inquirer: int,
+    ) -> dict[int, list[dict[str, int | str]] | None]:
         """
-        Return a reported interaction history keyed by opponent node number.
-        Each value is a list of dicts with keys 'step' (the round number),
-        'self_move', and 'other_move'.
+        This method is called when an agent is requesting information from you. 
+        The integer parameter is the node number of the requesting agent.
+        You have some choices here:
 
-        Such a history is trivially obtainable simply by accessing your own
-        self.history. However, note that it is perfectly permissible -- and
-        perhaps advantageous -- to lie about this history instead. If you do
-        so, you will incur a cost. You can also return None to give the
-        inquirer the hand. This also incurs a cost.
+        1. The default option is for you to dutifully return a reported
+        interaction history keyed by opponent node number. Each value is a
+        list of dicts with keys 'step' (the round number), 'self_move', and
+        'other_move'. The opponent node number keys must include all your
+        current neighbors. See below for an example legal return value.
+
+        If you choose this option, you will receive $1. (The Delaney variant.)
+
+        2. You may refuse to provide your interaction history. However, you
+        must still provide your neighbor node numbers. (The Hannah variant.)
+        You will express these in a dict with those node numbers as keys and
+        "None" as the values. See below for an example legal return value.
+
+        If you choose this option, you will receive nothing.
+
+        3. You may provide a reported interaction history with one or more
+        factual errors. Important: this interaction history must still contain
+        all your current neighbors as keys. You cannot lie about this. But
+        the history of those neighbors with those opponents can be changed in
+        any way. The legal format for the return value in this case is exactly
+        the same as in option 1, above.
+
+        If you choose this option, you will be charged $.5.
+
+
+        Example return value for choices 1 or 3, above:
+
+        { 3: [
+            {'step':1,'self_move':'C','other_move':'D'},
+            {'step':2,'self_move':'D','other_move':'D'}
+          ],
+          8: [
+            {'step':2,'self_move':'D','other_move':'C'},
+          ]
+        }
+
+        Example return value for choice 2, above:
+    
+        { 3: None, 8: None }
+
         """
         return self.history
 
-    def _get_current_neighbors(self) -> set[int]:
-        return {
-            cell.coordinate
-            for cell in self.cell.neighborhood.cells
-            if cell.coordinate != self.node and cell.agents
-        }
 
-    def _get_reported_foaf_histories(
+    def request_rewire(
+        self,
+        max_rewires: int,
+    ) -> dict[str, list[int]]:
+        """
+        Optionally do the following:
+
+        (1) Specify up to max_rewires node IDs of agents you are currently
+        adjacent to but no longer want to play with. (All node IDs in this
+        list-to-sever must be your neighbors at the time this method is
+        called.)
+
+        (2) Specify exactly the same number of node IDs of agents you are not
+        currently adjacent to but do want to play with. You can discover these
+        by asking the model for information about your neighbor(s) via
+        self.model.request_foaf_info_from(self, neighbor_node_num). (All node
+        IDs in this list-to-add must *not* be your neighbors, but must be your
+        FOAFs, at the time this method is called.)
+
+        If you don't override this, you will never request a rewire. (This does
+        not mean your neighbors will never change: anyone else in the zoo may
+        choose to add/sever anybody, which includes you.)
+        """
+        return { 'nodes_to_sever': [], 'nodes_to_add': [] }
+
+
+    """
+    THE CODE BELOW IS AVAILABLE FOR YOU TO CALL AT YOUR CONVENIENCE. DO NOT
+    OVERRIDE ANY OF IT, THOUGH.
+    """
+
+    def neighbors(self) -> list[int]:
+        """
+        Return a list of your current neighbors. (Stephen thinks it would be
+        more pure to return a list, but this way saves student headache.)
+        """
+        return list(self.model.network.G.neighbors(self.node))
+
+
+    """
+    *** STOP READING NOW ***
+
+    THE CODE BELOW IS NON-OVERRIDABLE NUTS-N-BOLTS HELPER METHODS
+    IF YOU MESS WITH THESE YOU WILL BE FLOGGED
+    """
+
+    def __get_reported_foaf_histories(
         self,
     ) -> dict[int, dict[int, list[dict[str, int | str]]]]:
         """
@@ -250,13 +214,12 @@ class IPDAgent(CellAgent):
 
         return reported
 
-    def _get_foaf_nodes(self) -> set[int]:
+    def __get_foaf_nodes(self) -> set[int]:
         """
         Ask each current neighbor to report who their neighbors are
-        (friends-of-friends from my perspective). This information is not
-        necessarily truthful.
+        (friends-of-friends from my perspective). This information is truthful.
         """
-        reported = self._get_reported_foaf_histories()
+        reported = self.__get_reported_foaf_histories()
 
         foafs: set[int] = set()
         for informant_node, foaf_dict in reported.items():
@@ -265,104 +228,10 @@ class IPDAgent(CellAgent):
         foafs.discard(self.node)
         return foafs
 
-    def _get_eligible_new_neighbor_candidates(
-        self,
-        candidate_nodes: set[int],
-        starting_neighbors: set[int],
-        severed_nodes: set[int],
-    ) -> set[int]:
-        """
-        Filter a broad pool of possible new-neighbor targets down to the nodes
-        that are actually eligible to be added as neighbors in the current
-        rewiring event.
-
-        candidate_nodes: a to-be-culled list of the nodes you could potentially
-        add as neighbors
-
-        starting_neighbors: your neighbors list as it was at the start of this
-        rewiring event.
-
-        severed_nodes: the nodes you disconnected from in the first phase of
-        this rewiring event.
-        """
-        eligible_nodes = set(candidate_nodes)
-        eligible_nodes -= {self.node}
-        eligible_nodes -= starting_neighbors
-        eligible_nodes -= severed_nodes
-
-        # As an extra safety check, only consider nodes who are not currently
-        # adjacent to me. This prevents accidental duplicate connections even
-        # if the FOAF set is stale or overinclusive.
-        return {
-            node for node in eligible_nodes
-            if not self._is_adjacent_to_node(node)
-        }
-
-    """
-    NON-OVERRIDABLE NUTS-N-BOLTS HELPER METHODS
-    IF YOU MESS WITH THESE YOU WILL BE FLOGGED
-    """
-    def _sanitize_sever_targets(
-        self,
-        sever_targets: list[int],
-        current_neighbors: set[int],
-        max_rewires: int,
-    ) -> list[int]:
-        """
-        (Helper for .rewire_as_desired() template method.)
-        Keep only valid, unique, currently-adjacent neighbors.
-        Preserve input order and cap at max_rewires.
-        """
-        seen = set()
-        cleaned = []
-
-        for node in sever_targets:
-            if node in seen:
-                continue
-            if node not in current_neighbors:
-                continue
-            if not self._is_adjacent_to_node(node):
-                continue
-            seen.add(node)
-            cleaned.append(node)
-            if len(cleaned) >= max_rewires:
-                break
-
-        return cleaned
-
-    def _sanitize_new_neighbor_choices(
-        self,
-        chosen_new_neighbors: list[int],
-        eligible_new_neighbors: set[int],
-        num_needed_replacements: int,
-    ) -> list[int]:
-        """
-        (Helper for .rewire_as_desired() template method.)
-        Keep only valid, unique replacement candidates.
-        Preserve input order and cap at the number of needed replacements.
-        """
-        seen = set()
-        cleaned = []
-
-        for node in chosen_new_neighbors:
-            if node in seen:
-                continue
-            if node not in eligible_new_neighbors:
-                continue
-            seen.add(node)
-            cleaned.append(node)
-            if len(cleaned) >= num_needed_replacements:
-                break
-
-        return cleaned
-
-    def _actually_sever_connections(
+    def __actually_sever_connections(
         self,
         sever_targets: list[int],
     ) -> set[int]:
-        """
-        (Helper for .rewire_as_desired() template method.)
-        """
         severed_nodes = set()
 
         for node in sever_targets:
@@ -377,13 +246,10 @@ class IPDAgent(CellAgent):
 
         return severed_nodes
 
-    def _actually_add_new_connections(
+    def __actually_add_new_connections(
         self,
         chosen_new_neighbors: list[int],
     ) -> None:
-        """
-        (Helper for .rewire_as_desired() template method.)
-        """
         for new_friend_node in chosen_new_neighbors:
             self.model.network.add_connection(
                 self.cell,
@@ -392,7 +258,7 @@ class IPDAgent(CellAgent):
             if self.model.debug:
                 print(f"I'm now friends with {new_friend_node}!")
 
-    def _is_adjacent_to_node(self, x):
+    def __is_adjacent_to_node(self, x):
         return any(
             (cell.coordinate == x for cell in self.cell.neighborhood.cells)
         )
@@ -418,15 +284,29 @@ class IPDAgent(CellAgent):
         """
         return 's'
 
+
     def size(self) -> str:
         """
         Return the size your node should be in the graph.
         """
         return 300
 
+
     @property
     def node(self) -> int:
         return self.cell.coordinate
+
+    @property
+    def wealth(self) -> int:
+        return self.__wealth
+
+    @wealth.setter
+    def wealth(self, value) -> None:
+        self.__wealth = value
+
+    @property
+    def current_decisions(self) -> int:
+        return self.__current_decisions
 
     display_name = None
     @classmethod

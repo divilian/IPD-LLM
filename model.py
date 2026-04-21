@@ -141,6 +141,17 @@ class IPDModel(Model):
             "agent_type",
         )
 
+    def request_foaf_info_from(self, agent, neighbor_node):
+        """
+        Agents call this method when they want to ask neighbors for FOAF info.
+        If an agent asks for info from a neighbor that is not their FOAF, die.
+        """
+        if neighbor_node not in self.network.G.neighbors(agent.node):
+            raise ValueError
+        answer = self.node_to_agent[neighbor_node].inform_foaf(agent.node)
+        # Depending on what they did, levy appropriate charges.
+        return answer
+        
     def _coop_rate(self) -> float:
         total = 0
         coop = 0
@@ -186,7 +197,6 @@ class IPDModel(Model):
             for n in self.network.G.neighbors(a.node):
                 output = a.decide_against(
                     self.node_to_agent[n],
-                    self.payoff_matrix,
                     give_rationale=self.give_rationales
                 )
                 a.current_decisions[n], _ = output
@@ -215,11 +225,57 @@ class IPDModel(Model):
                 a.wealth += a.current_iter_payment / k
 
     def _permit_rewiring(self) -> None:
-        self.agents.shuffle_do(
-            "rewire_as_desired",
-            self.payoff_matrix,
-            self.max_rewires,
-        )
+
+        snapshot = self.network.G.copy()
+
+        requests_by_agent = {
+            a: a.request_rewire(self.max_rewires)
+            for a in self.agents 
+        }
+
+        severs = set()
+        adds = set()
+
+        for agent, r in requests_by_agent.items():
+            sever_nodes = tuple(sorted(r["nodes_to_sever"]))
+            add_nodes = tuple(sorted(r["nodes_to_add"]))
+ 
+            for s in sever_nodes:
+                if snapshot.has_edge(agent.node, s):
+                    severs.add((agent.node, s))
+ 
+            for a in add_nodes:
+                if self.is_foaf(snapshot, agent.node, a):
+                    adds.add((agent.node, a))
+ 
+        adds -= severs
+ 
+        for u, v in severs:
+            if self.network.G.has_edge(u, v):
+                self.network.G.remove_edge(u, v)
+ 
+        for u, v in adds:
+            if not self.network.G.has_edge(u, v):
+                self.network.G.add_edge(u, v)
+
+        for sever in severs:
+            cell1 = self.network[sever[0]]
+            cell2 = self.network[sever[1]]
+            cell1.disconnect(cell2)
+
+        for add in adds:
+            cell1 = self.network[sever[0]]
+            cell2 = self.network[sever[1]]
+            cell1.connect(cell2)
+
+    def is_foaf(self, G, u, v):
+        if u == v:
+            return False
+        if u not in G or v not in G:
+            return False
+        if G.has_edge(u, v):
+            return False
+        return any(True for _ in nx.common_neighbors(G, u, v))
 
     def estimate_expected_avg_wealth(self):
         avg_agent_per_iter = 0.25 * (
