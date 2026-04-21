@@ -138,7 +138,7 @@ def plot(model, ctx, monies, t, num_iter, interactive=True):
                 ctx["ax"],
                 ctx["pos"][node],
                 colors[i],
-                player_display_name(agent),
+                f"{player_display_name(agent)}\n({agent.node})",
             )
         else:
             label_nodes[node] = str(node)
