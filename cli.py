@@ -274,23 +274,23 @@ def interact_with_model(m: IPDModel):
             print("Neighbors:")
             for neigh in neighs:
                 print(f" - {m.node_to_agent[neigh]}")
-                node_num_str = input(neigh_prompt(m, n))
-                while node_num_str != "done":
-                    neigh = int(node_num_str)
-                    if neigh in m.network.G.neighbors(n):
-                        ncn = m.node_to_agent[neigh].__class__.__name__
-                        print(f"History with {ncn} {neigh}:")
-                        print(
-                            pd.DataFrame(m.node_to_agent[n].history[neigh]).rename(
-                                columns={
-                                    'self_action': f'Node {n}',
-                                    'other_action': f'Node {neigh}'
-                                }
-                            )
+            node_num_str = input(neigh_prompt(m, n))
+            while node_num_str != "done":
+                neigh = int(node_num_str)
+                if neigh in m.network.G.neighbors(n):
+                    ncn = m.node_to_agent[neigh].__class__.__name__
+                    print(f"History with {ncn} {neigh}:")
+                    print(
+                        pd.DataFrame(m.node_to_agent[n].history[neigh]).rename(
+                            columns={
+                                'self_action': f'Node {n}',
+                                'other_action': f'Node {neigh}'
+                            }
                         )
-                    else:
-                        print(f" (Node {n} not adjacent to {neigh}.)")
-                    node_num_str = input(neigh_prompt(m, n))
+                    )
+                else:
+                    print(f" (Node {n} not adjacent to {neigh}.)")
+                node_num_str = input(neigh_prompt(m, n))
 
         node_num_str = input(node_prompt(m))
 
