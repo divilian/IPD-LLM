@@ -1,8 +1,11 @@
+annotated-types==0.7.0
 httpx==0.28.1
+ipdb==0.13.13
 matplotlib==3.10.8
-mesa==3.5.1
+Mesa==3.4.0
 networkx==3.6.1
-numpy==2.4.4
-pandas==3.0.2
-requests==2.33.1
-tqdm==4.67.1
+pip==26.0.1
+pipreqs==0.4.13
+polars==1.36.1
+pydantic_core==2.41.5
+typing-inspection==0.4.2
