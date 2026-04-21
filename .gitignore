@@ -1,4 +1,6 @@
 __pycache__
 *.out
-run.sh
+*.sh
 *.pdf
+*.mp4
+*.svg

@@ -1,19 +1,14 @@
 from typing import List, Tuple
-import logging
 from collections import Counter
-import asyncio
 
 from mesa import Model, DataCollector
+from mesa.discrete_space import Network
 import networkx as nx
 import numpy as np
 
+from agents.base import IPDAgent
 from agents.factory import AgentFactory
-from agents.llm_agent import LLMAgent
-from graph.sbm import compute_sbm_probs
-from llm.prompt_builder import build_batch_prompt
-from llm.backend import LLMBackend
 from llm.ollama_backend import OllamaBackend
-from llm.mock_backend import MockBackend
 
 
 class IPDModel(Model):
@@ -23,14 +18,20 @@ class IPDModel(Model):
 
     def __init__(
         self,
-        N,  # num agents
+        N,
         avg_degree: float,
         payoff_matrix: List[Tuple],
         p_same: float,
         p_diff: float,
         num_iter: int,
         agent_factory: AgentFactory,
-        llm_backend: LLMBackend,
+        extra_agent_classes: list[type[IPDAgent]] | None,
+        max_rewires: int,
+        give_rationales: bool,
+        llm_backend: OllamaBackend,
+        ollama_model: str,
+        llm_out_file: str,
+        debug: bool,
         seed: int,
     ):
         super().__init__(rng=seed)
@@ -39,32 +40,59 @@ class IPDModel(Model):
         self.seed = seed
         self.payoff_matrix = payoff_matrix
         self.num_iter = num_iter
+        self.max_rewires = max_rewires
+        self.give_rationales = give_rationales
         self.llm_backend = llm_backend
+        self.ollama_model = ollama_model
+        self.llm_out_file = llm_out_file
+        self.debug = debug
+        self.extra_agent_classes = list(extra_agent_classes or [])
+        self.total_agents = self.N + len(self.extra_agent_classes)
 
-        # Distinct specs = SBM blocks (stable order)
-        specs = sorted(
-            agent_factory.probs,
-            key=lambda spec: (spec[0].__name__, spec[1]),
-        )
-        sizes = [int(round(agent_factory.probs[c] * N)) for c in specs]
+        base_plan = agent_factory.plan_agent_specs(self.N, self.random)
+        extra_specs = [(agent_cls, {}) for agent_cls in self.extra_agent_classes]
+        all_specs = base_plan + extra_specs
 
-        # Build SBM graph (nodes grouped by block).
-        num_agent_types = len(specs)
+        if not all_specs:
+            raise ValueError("Simulation must contain at least one agent")
+
+        labels = [self._agent_block_label(agent_cls) for agent_cls, _ in all_specs]
+        blocks: list[tuple[str, list[tuple[type, dict]]]] = []
+        for label in labels:
+            if not blocks or blocks[-1][0] != label:
+                blocks.append((label, []))
+        block_lists = {id(items): items for _, items in blocks}
+        block_index = 0
+        for spec in all_specs:
+            label = self._agent_block_label(spec[0])
+            while blocks[block_index][0] != label:
+                block_index += 1
+            block_lists[id(blocks[block_index][1])].append(spec)
+        grouped_specs = [items for _, items in blocks]
+
+        sizes = [len(group) for group in grouped_specs]
+
+        num_agent_types = len(grouped_specs)
         p = p_diff * np.ones((num_agent_types, num_agent_types))
         for i in range(num_agent_types):
             p[i][i] = p_same
-        self.graph = nx.stochastic_block_model(sizes, p, seed=self.seed)
+        graph = nx.stochastic_block_model(sizes, p, seed=self.seed)
+        self.network = Network(graph, random=self.random)
 
-        nodes = list(self.graph.nodes)
-        idx = 0
+        cells = list(self.network.all_cells.cells)
         self.node_to_agent = {}
-        for (agent_cls, kwargs_items), sz in zip(specs, sizes):
-            init_kwargs = dict(kwargs_items)
-            for _ in range(sz):
-                node = nodes[idx]
-                agent = agent_cls(self, node, **init_kwargs)
-                self.node_to_agent[node] = agent
+        self.custom_player_nodes: set[int] = set()
+        idx = 0
+        for group in grouped_specs:
+            for agent_cls, init_kwargs in group:
+                cell = cells[idx]
+                agent = agent_cls(self, cell, **init_kwargs)
+                if agent_cls in self.extra_agent_classes:
+                    setattr(agent, "render_as_player_oval", True)
+                    self.custom_player_nodes.add(cell.coordinate)
+                self.node_to_agent[cell.coordinate] = agent
                 idx += 1
+
         self.agent_to_node = {
             agent: node
             for node, agent in self.node_to_agent.items()
@@ -72,22 +100,28 @@ class IPDModel(Model):
 
         self.datacollector = DataCollector(
             model_reporters={
-                "avg_payoff":
-                    lambda m: sum(a.wealth for a in m.agents) / len(m.agents),
+                "avg_payoff": lambda m: sum(a.wealth for a in m.agents) / len(m.agents),
                 "coop_rate": self._coop_rate,
-                "avg_degree":
-                    lambda m: (
-                        sum(dict(m.graph.degree()).values())
-                        / m.graph.number_of_nodes()
-                    )
-                    if m.graph.number_of_nodes()
-                    else 0.0,
+                "avg_degree": lambda m: (
+                    sum(dict(m.network.G.degree()).values())
+                    / m.network.G.number_of_nodes()
+                    if m.network.G.number_of_nodes()
+                    else 0.0
+                ),
             }
         )
 
-        # Peace of mind that node IDs and agent IDs haven't drifted weirdly.
-        assert set(self.node_to_agent.keys()) == set(self.graph.nodes)
+        assert set(self.node_to_agent.keys()) == set(self.network.G.nodes)
         assert all(a.node == n for n, a in self.node_to_agent.items())
+
+        if self.llm_backend:
+            self.llm_backend.ensure_ollama_running()
+
+    def _agent_block_label(self, agent_cls: type[IPDAgent]) -> str:
+        return agent_cls.__name__
+
+    def is_custom_player_node(self, node: int) -> bool:
+        return node in self.custom_player_nodes
 
     def assortativity(self) -> float:
         """
@@ -98,13 +132,26 @@ class IPDModel(Model):
         connect to different types (a TitForTat to Means and Suckers, e.g.)
         """
         nx.set_node_attributes(
-            self.graph,
-            {node: agent.__class__.__name__
-             for node, agent in self.node_to_agent.items()},
+            self.network.G,
+            {node: agent.__class__.__name__ for node, agent in self.node_to_agent.items()},
             name="agent_type",
         )
-        return nx.attribute_assortativity_coefficient(self.graph, "agent_type")
+        return nx.attribute_assortativity_coefficient(
+            self.network.G,
+            "agent_type",
+        )
 
+    def request_foaf_info_from(self, agent, neighbor_node):
+        """
+        Agents call this method when they want to ask neighbors for FOAF info.
+        If an agent asks for info from a neighbor that is not their FOAF, die.
+        """
+        if neighbor_node not in self.network.G.neighbors(agent.node):
+            raise ValueError
+        answer = self.node_to_agent[neighbor_node].inform_foaf(agent.node)
+        # Depending on what they did, levy appropriate charges.
+        return answer
+        
     def _coop_rate(self) -> float:
         total = 0
         coop = 0
@@ -115,130 +162,122 @@ class IPDModel(Model):
                     coop += 1
         return coop / total if total else 0.0
 
+
     def step(self) -> None:
-        asyncio.run(self._step_async())
-
-    async def _step_async(self):
-
         # Reset agent state for this new round.
         for a in self.agents:
             a.current_iter_payment = 0
             a.current_decisions.clear()
 
-        # Who are our LLM agents? They're the time-consuming ones.
-        llm_agents = [a for a in self.agents if isinstance(a, LLMAgent)]
-
-        if llm_agents and self.llm_backend is not None:
-
-            # Build the "payloads" for each agent; that is, what will be
-            # inserted into the batch prompt for the LLM to make decisions
-            # about.
-            payloads = [a.decision_context() for a in llm_agents]
-
-            # Given all the necessary LLM agent state info, build the prompt.
-            prompt = build_batch_prompt(payloads, self.payoff_matrix)
-
-            # Twiddle our thumbs until the LLM gives us decisions on all of the
-            # agents.
-            response = await self.llm_backend.batch_decide(prompt)
-
-            # Record the LLM's decisions in each agent.
-            self._apply_llm_decisions(response['decisions'])
-
-        # Okay, now we can run the fast-moving guys.
-        self._run_rule_agents()
+        if self.debug:
+            print(
+                f"========== Agents running in iter {self.steps} "
+                f"of {self.num_iter} =========="
+            )
+        self._run_agents()
 
         # Actually "commit" the moves by propagating to agent inst vars (wealth
         # and history).
         self._resolve_payoffs()
 
+        # Permit all agents to sever and form connections as they desire.
+        self._permit_rewiring()
+
         # Stuff happened, in case you care.
         self.datacollector.collect(self)
 
-    def _apply_llm_decisions(self, decisions_for_round):
-        """
-        Unpack this list:
-                [
-                    {"id": 0, "opponent": 3, "move": "C"},
-                    {"id": 0, "opponent": 1, "move": "D"},
-                    {"id": 1, "opponent": 2, "move": "D"},
-                    ...
-                ]
-        and add all that information to the agents' current_decisions dicts.
-        """
-        for d in decisions_for_round:
-            aid = int(d["id"])
-            oid = int(d["opponent"])
-            move = d["move"]
-            if move not in ("C", "D"):
-                raise ValueError(f"Invalid move from LLM: {move}")
-            if aid not in self.node_to_agent:
-                raise ValueError(f"Unknown agent id from LLM! {aid}")
-            if oid not in self.node_to_agent:
-                raise ValueError(f"Unknown opponent id from LLM! {oid}")
-            if oid not in set(self.graph.neighbors(aid)):
-                raise ValueError(
-                    f"LLM gave non-neighbor opponent {oid} for agent {aid}!"
-                )
-            self.node_to_agent[aid].current_decisions[oid] = move
+        if self.debug:
+            print(
+                f"========== Agents running in iter {self.steps} "
+                f"of {self.num_iter} =========="
+            )
 
-    def _run_rule_agents(self) -> None:
-        rule_agents = [a for a in self.agents if not isinstance(a, LLMAgent)]
-        for ra in rule_agents:
-            for n in self.graph.neighbors(ra.node):
-                ra.current_decisions[n], _ = ra.decide_against(
-                    self.node_to_agent[n],
-                    self.payoff_matrix,
+    def _run_agents(self) -> None:
+        for a in self.agents:
+            for n in self.network.G.neighbors(a.node):
+                output = a.decide_against(
+                    n,
+                    give_rationale=self.give_rationales
                 )
+                a.current_decisions[n], _ = output
 
     def _resolve_payoffs(self) -> None:
-        """
-        Resolve and commit all the information in the agents' current_decisions
-        dicts. For each one, determine the output of that round of the game
-        against the agent's opponent, award winnings, and record history.
-        """
         processed = set()
 
         for a in self.agents:
             i = a.node
-
-            for j in self.graph.neighbors(i):
-
+            for j in self.network.G.neighbors(i):
                 if (j, i) in processed:
                     continue
-
                 b = self.node_to_agent[j]
-
                 move_i = a.current_decisions[j]
                 move_j = b.current_decisions[i]
-
                 payoff_i, payoff_j = self.payoff_matrix[(move_i, move_j)]
-
                 a.current_iter_payment += payoff_i
                 b.current_iter_payment += payoff_j
-
                 a.record_interaction(j, move_i, move_j)
                 b.record_interaction(i, move_j, move_i)
-
                 processed.add((i, j))
 
-        # Award the winnings, but scale by the node's degree. This is to avoid
-        # disadvantaging agents with fewer neighbors who of course therefore
-        # play fewer rounds and hence have lower winnings.
         for a in self.agents:
-            k = self.graph.degree[a.node]
+            k = self.network.G.degree[a.node]
             if k > 0:
                 a.wealth += a.current_iter_payment / k
 
+    def _permit_rewiring(self) -> None:
+
+        snapshot = self.network.G.copy()
+
+        requests_by_agent = {
+            a: a.request_rewire(self.max_rewires)
+            for a in self.agents 
+        }
+
+        severs = set()
+        adds = set()
+
+        for agent, r in requests_by_agent.items():
+            sever_nodes = tuple(sorted(r["nodes_to_sever"]))
+            add_nodes = tuple(sorted(r["nodes_to_add"]))
+ 
+            for s in sever_nodes:
+                if snapshot.has_edge(agent.node, s):
+                    severs.add((agent.node, s))
+ 
+            for a in add_nodes:
+                if self.is_foaf(snapshot, agent.node, a):
+                    adds.add((agent.node, a))
+ 
+        adds -= severs
+ 
+        for u, v in severs:
+            if self.network.G.has_edge(u, v):
+                self.network.G.remove_edge(u, v)
+ 
+        for u, v in adds:
+            if not self.network.G.has_edge(u, v):
+                self.network.G.add_edge(u, v)
+
+        for sever in severs:
+            cell1 = self.network[sever[0]]
+            cell2 = self.network[sever[1]]
+            cell1.disconnect(cell2)
+
+        for add in adds:
+            cell1 = self.network[sever[0]]
+            cell2 = self.network[sever[1]]
+            cell1.connect(cell2)
+
+    def is_foaf(self, G, u, v):
+        if u == v:
+            return False
+        if u not in G or v not in G:
+            return False
+        if G.has_edge(u, v):
+            return False
+        return any(True for _ in nx.common_neighbors(G, u, v))
+
     def estimate_expected_avg_wealth(self):
-        """
-        Completely back-of-the-envelope estimate of "about how much should each
-        agent expect to win during this situation?" The crude formula assumes
-        an independent 50/50 chance of choosing to defect or cooperate. Note
-        that we compute "per_iter" here (not "per_encounter") because we're
-        discounting each agent's per-iteration winnings by its degree (which
-        is its number of encounters).
-        """
         avg_agent_per_iter = 0.25 * (
             self.payoff_matrix[("C", "C")][0]
             + self.payoff_matrix[("D", "C")][0]
@@ -248,9 +287,6 @@ class IPDModel(Model):
         return avg_agent_per_iter * self.num_iter
 
     def agent_mix(self) -> dict[str, int]:
-        """
-        Return counts of agents by concrete subclass name.
-        """
         return dict(
             Counter(agent.__class__.__name__ for agent in self.agents)
         )
@@ -259,6 +295,6 @@ class IPDModel(Model):
         ret_val = "with this agent mix:\n"
         am = [f"{c:>18}:{n:>5}" for c, n in self.agent_mix().items()]
         ret_val += "\n".join(am)
-        ret_val += f"\nThe graph has {self.graph.size()} edges "
+        ret_val += f"\nThe graph has {self.network.G.size()} edges "
         ret_val += f"and assortativity {self.assortativity():.3f}."
         return ret_val

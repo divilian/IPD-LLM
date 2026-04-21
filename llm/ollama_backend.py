@@ -1,113 +1,140 @@
 import subprocess
-import requests
-import httpx
 import time
+from pathlib import Path
 import json
+import requests
 
-from .backend import LLMBackend, register_backend
-
-
-@register_backend("ollama")
-class OllamaBackend(LLMBackend):
-
-    def __init__(self, model_name: str):
+class OllamaBackend:
+    def __init__(
+        self,
+        model_name: str,
+        host: str = "http://localhost:11434",
+        timeout: int = 120,
+        seed: int = 123,
+        num_ctx: int = 2048,
+    ):
         self.model_name = model_name
+        self.host = host.rstrip("/")
+        self.timeout = timeout
+        self.seed = seed
+        self.num_ctx = num_ctx
 
-    @classmethod
-    def from_args(cls, args) -> "LLMBackend":
-        return cls(model_name=args.ollama_model)
+    def ensure_ollama_running(self) -> None:
+        try:
+            r = requests.get(f"{self.host}/api/tags", timeout=2)
+            r.raise_for_status()
+            return
+        except requests.RequestException:
+            pass
 
-    async def batch_decide(self, prompt: str) -> dict:
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(
-                "http://127.0.0.1:11434/api/chat",
-                json={
-                    "model": self.model_name,
-                    "messages": [
-                        {"role": "system",
-                         "content": "You are a strategic decision engine."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.0,
-                    "stream": False,
-                },
+        log_path = Path("ollama.log")
+        with log_path.open("ab") as log:
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
             )
 
+        deadline = time.time() + 15
+        last_error = None
+
+        while time.time() < deadline:
+            try:
+                r = requests.get(f"{self.host}/api/tags", timeout=2)
+                r.raise_for_status()
+                return
+            except requests.RequestException as e:
+                last_error = e
+                time.sleep(0.5)
+
+        raise RuntimeError(f"Ollama did not start in time: {last_error}")
+
+    def generate_text(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        response_format: str | dict | None = None,
+        temperature: float = 0.0,
+        num_predict: int = 128,
+    ) -> str:
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "seed": self.seed,
+                "temperature": temperature,
+                "num_ctx": self.num_ctx,
+                "num_predict": num_predict,
+            },
+        }
+
+        if system is not None:
+            payload["system"] = system
+
+        if response_format is not None:
+            payload["format"] = response_format
+
+        r = requests.post(
+            f"{self.host}/api/generate",
+            json=payload,
+            timeout=self.timeout,
+        )
         r.raise_for_status()
 
-        # The JSON that Ollama returns looks like this:
-        # 
-        # {
-        #   "message": {
-        #     "role": "assistant",
-        #     "content": "{ \"decisions\": [...] }"
-        #   }
-        # }
-        #
-        # so we need to get the value of "content" and then treat *it* as a
-        # JSON string, which we'll parse with json.loads().
-        embedded_content = r.json()['message']['content']
-        return json.loads(embedded_content)
+        data = r.json()
 
+        if "response" not in data:
+            raise RuntimeError(f"Unexpected Ollama response payload: {data}")
 
-def ensure_ollama_running(ollama_model: str):
-    """
-    Ensure Ollama daemon is running and the required model is available.
-    If daemon is not running, start it.
-    If model is not present, pull it.
-    """
+        if data.get("done") is False:
+            raise RuntimeError(f"Ollama did not finish generation: {data}")
 
-    def daemon_alive() -> bool:
-        try:
-            r = requests.get(
-                "http://127.0.0.1:11434/api/tags",
-                timeout=0.5,
-            )
-            return r.status_code == 200
-        except requests.RequestException:
-            return False
-
-    # Start daemon (if needed).
-    if not daemon_alive():
-        print("Starting Ollama daemon...")
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
-        deadline = time.time() + 30
-        while time.time() < deadline:
-            if daemon_alive():
-                print("Ollama daemon is ready.")
-                break
-            time.sleep(0.25)
-        else:
+        if data.get("done_reason") == "length":
             raise RuntimeError(
-                "Ollama daemon did not start within 30 seconds."
+                "Ollama output was truncated (done_reason='length'). "
+                "Increase num_predict."
             )
 
-    # Ensure model is available.
-    r = requests.get(
-        "http://127.0.0.1:11434/api/tags",
-        timeout=2.0,
-    )
-    r.raise_for_status()
+        return data["response"].strip()
 
-    available_models = {
-        m["name"]
-        for m in r.json().get("models", [])
-    }
-
-    if ollama_model not in available_models:
-        print(f"Model '{ollama_model}' not found locally.")
-        print("Pulling model from Ollama registry...")
-        subprocess.run(
-            ["ollama", "pull", ollama_model],
-            check=True,
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        schema: dict,
+        system: str | None = None,
+        temperature: float = 0.0,
+        num_predict: int = 128,
+    ) -> dict:
+        json_guardrail = (
+            "Return only valid JSON matching the provided schema. "
+            "Do not output any text outside the JSON object."
         )
-        print("Model pull complete.")
+        effective_system = (
+            f"{system}\n\n{json_guardrail}" if system else json_guardrail
+        )
 
+        text = self.generate_text(
+            prompt,
+            system=effective_system,
+            response_format=schema,
+            temperature=temperature,
+            num_predict=num_predict,
+        )
 
+        try:
+            obj = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Model returned invalid JSON: {text[:500]!r}"
+            ) from e
+
+        if not isinstance(obj, dict):
+            raise ValueError(
+                f"Expected top-level JSON object, got {type(obj).__name__}"
+            )
+
+        return obj

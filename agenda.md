@@ -1,5 +1,36 @@
 # Prisoner's Dilemma agenda
 
+## Student-competition-related
+
+1. Actually charge `inform_foaf()` costs.
+
+## SCC paper related
+
+### Prompt Ablations
+
+How much should I tell it about the game at once?
+
+- give it specific curated metrics (mutual cooperation rate, last n moves, etc.) for use in deciding, or just a raw game history?
+
+- valorizing "mutual cooperation"
+
+Now I can _measure_ how much I'm "steering" towards a particular strategy.
+
+### Misc
+
+- [ ] Capture rewiring decisions with datacollector
+- [ ] Lower temperature (this is about policy calls, not creative output. Lower
+  temp doesn't mean fancier strategies aren't available, but rather that it'll
+  be less stochastic in choosing from its learned distribution.)
+- [ ] Spin up a GC instance to run at scale
+- [ ] Enable LLMs to rewire their local graph and to request info from peers
+    - [ ] Enable agents to lie and to refuse
+- [ ] Calculate action metrics (C vs D's; total $ earned; number of rewires;
+  etc) based on agent type
+- [ ] Experiment with a small number of different prompts
+- [ ] Store animation frames for fast replay
+
+
 ## Performance
 
 - [ ] _If_ it turns out to be empirically slow, consider asychronous agents
@@ -7,6 +38,7 @@
 
 ## Bug fixes
 
+- [ ] Fix typehint everywhere on `payoff_matrix`: should be `dict[tuple[str, str], tuple[int, int]]`
 - [ ] How does `--avg-degree` combine with `--p-same/diff`?
 - [x] There's still some LLM-related stuff in the IPDAgent base class
 - [ ] Add payoffs to global prompt text
@@ -17,6 +49,8 @@
   in IPD sim ChatGPT project)
 
 ## Improvements
+
+* [ ] Make Browser "patience" a command-line arg
 
 ### Original-LLM-design-specific
 
@@ -31,13 +65,18 @@
 
 ## Diagnostics
 
+- [ ] Change analyze mode to show all history with any opponent you were _ever_
+  connected to, not just who you're connected to at game end
 - [x] Add agent query mode, where you can interactively type a node number and
   get its number and types of neighbors
 - [ ] Analyze on a per-dyad basis
+- [x] Print agent-type-based adjacency matrix, before and after
+* [ ] How does the patience parameter impact how well the Browsers do?
 
 ## Model
 
 - [ ] Agents which seek to break/form connections with better players
+    - [ ] Should agents have to approve friend requests? Interesting!
 - [ ] LLMAgents which seek to lose
 - [ ] LLMAgents which seek to maximize total combined winnings, not just theirs
 - [ ] `AmnesiacAgent` (remembers past plays, but not by whom. tit-for-tats)
