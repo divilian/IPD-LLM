@@ -70,10 +70,41 @@ def setup_plotting(model, interactive=True) -> dict:
     }
 
 
-def _draw_player_oval(ax, pos, color, label):
+def _draw_player_oval(ax, pos, color, label, *, fontsize=10,
+                      pad_pts=4, min_width=0.20, min_height=0.10):
     x, y = pos
-    width = max(0.20, 0.04 * max(len(label), 4))
-    height = 0.13
+
+    txt = ax.text(
+        x, y, label,
+        ha="center",
+        va="center",
+        multialignment="center",
+        fontsize=fontsize,
+        color="black",
+        zorder=4,
+    )
+
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    bbox = txt.get_window_extent(renderer=renderer)
+
+    # padding in pixels
+    pad_px = pad_pts * fig.dpi / 72.0
+
+    bbox_padded = bbox.expanded(
+        (bbox.width + 2 * pad_px) / bbox.width if bbox.width else 1.0,
+        (bbox.height + 2 * pad_px) / bbox.height if bbox.height else 1.0,
+    )
+
+    (x0, y0), (x1, y1) = ax.transData.inverted().transform(
+        [[bbox_padded.x0, bbox_padded.y0], [bbox_padded.x1, bbox_padded.y1]]
+    )
+
+    width = max(min_width, x1 - x0)
+    height = max(min_height, y1 - y0)
+
     ellipse = Ellipse(
         (x, y),
         width=width,
@@ -84,17 +115,8 @@ def _draw_player_oval(ax, pos, color, label):
         zorder=3,
     )
     ax.add_patch(ellipse)
-    ax.text(
-        x,
-        y,
-        label,
-        ha="center",
-        va="center",
-        fontsize=10,
-        color="black",
-        zorder=4,
-    )
 
+    return ellipse, txt
 
 def plot(model, ctx, monies, t, num_iter, interactive=True):
     # Update node positions gracefully.  
