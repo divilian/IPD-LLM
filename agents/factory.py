@@ -26,7 +26,6 @@ def register_agent(
 
 
 from .base import IPDAgent
-from .llm_agent import LLMAgent
 from .rule_based import TitForTatAgent, BrowserAgent
 
 
