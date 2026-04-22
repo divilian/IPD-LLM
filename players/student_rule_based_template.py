@@ -91,7 +91,7 @@ class StudentRuleBasedTemplate(IPDAgent):
 
         (1) Specify up to max_rewires node IDs of agents you are currently
         adjacent to but no longer want to play with. (All node IDs in this
-        list-to-sever must be your neighbors at the time this method is
+        list-to-drop must be your neighbors at the time this method is
         called.)
 
         (2) Specify exactly the same number of node IDs of agents you are not
@@ -103,7 +103,7 @@ class StudentRuleBasedTemplate(IPDAgent):
 
         If you don't override this, you will never request a rewire. (This does
         not mean your neighbors will never change: anyone else in the zoo may
-        choose to add/sever anybody, which includes you.)
+        choose to add/drop anybody, which includes you.)
         """
-        return { 'nodes_to_sever': [], 'nodes_to_add': [] }
+        return { 'nodes_to_drop': [], 'nodes_to_add': [] }
 
