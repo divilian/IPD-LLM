@@ -180,7 +180,7 @@ class IPDModel(Model):
         # and history).
         self._resolve_payoffs()
 
-        # Permit all agents to sever and form connections as they desire.
+        # Permit all agents to drop and form connections as they desire.
         self._permit_rewiring()
 
         # Stuff happened, in case you care.
@@ -233,11 +233,13 @@ class IPDModel(Model):
             for a in self.agents 
         }
 
-        severs = set()
+        drops = set()
         adds = set()
 
         for agent, r in requests_by_agent.items():
-            sever_nodes = tuple(sorted(r["nodes_to_sever"]))
+            if 'nodes_to_drop' not in r:
+                import ipdb ; ipdb.set_trace()
+            drop_nodes = tuple(sorted(r["nodes_to_drop"]))
             add_nodes = tuple(sorted(r["nodes_to_add"]))
 
             # this takes the first n in case lengths dont match
@@ -245,17 +247,17 @@ class IPDModel(Model):
             sever_nodes = sever_nodes[:n]
             add_nodes = add_nodes[:n]
  
-            for s in sever_nodes:
+            for s in drop_nodes:
                 if snapshot.has_edge(agent.node, s):
-                    severs.add((agent.node, s))
+                    drops.add((agent.node, s))
  
             for a in add_nodes:
                 if self.is_foaf(snapshot, agent.node, a):
                     adds.add((agent.node, a))
  
-        adds -= severs
+        adds -= drops
  
-        for u, v in severs:
+        for u, v in drops:
             if self.network.G.has_edge(u, v):
                 self.network.G.remove_edge(u, v)
  
@@ -263,9 +265,9 @@ class IPDModel(Model):
             if not self.network.G.has_edge(u, v):
                 self.network.G.add_edge(u, v)
 
-        for sever in severs:
-            cell1 = self.network[sever[0]]
-            cell2 = self.network[sever[1]]
+        for drop in drops:
+            cell1 = self.network[drop[0]]
+            cell2 = self.network[drop[1]]
             cell1.disconnect(cell2)
 
         for add in adds:

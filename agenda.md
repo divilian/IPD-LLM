@@ -2,7 +2,12 @@
 
 ## Student-competition-related
 
-1. Actually charge `inform_foaf()` costs.
+1. Actually levy `inform_foaf()` charges.
+2. Make terminology consistent:
+    a. round, move, turn.
+    b. sever, drop.
+    c. opponent, neighbors, node, agent, ID.
+3. What's the deal with Cory's PR merges? In main but not dev? Get those in dev?
 
 ## SCC paper related
 

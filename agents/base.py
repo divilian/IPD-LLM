@@ -13,7 +13,7 @@ class IPDAgent(CellAgent):
 
     Optional overrides:
         - inform_foaf()
-        - rewire_as_desired()
+        - request_rewire()
     """
 
     def __init__(
@@ -119,21 +119,21 @@ class IPDAgent(CellAgent):
 
         (1) Specify up to max_rewires node IDs of agents you are currently
         adjacent to but no longer want to play with. (All node IDs in this
-        list-to-sever must be your neighbors at the time this method is
+        nodes-to-drop list must be your neighbors at the time this method is
         called.)
 
         (2) Specify exactly the same number of node IDs of agents you are not
         currently adjacent to but do want to play with. You can discover these
         by asking the model for information about your neighbor(s) via
         self.model.request_foaf_info_from(self, neighbor_node_num). (All node
-        IDs in this list-to-add must *not* be your neighbors, but must be your
-        FOAFs, at the time this method is called.)
+        IDs in this nodes-to-add list must *not* be your neighbors, but must be
+        your FOAFs, at the time this method is called.)
 
         If you don't override this, you will never request a rewire. (This does
         not mean your neighbors will never change: anyone else in the zoo may
-        choose to add/sever anybody, which includes you.)
+        choose to add/drop anybody, which includes you.)
         """
-        return { 'nodes_to_sever': [], 'nodes_to_add': [] }
+        return { 'nodes_to_drop': [], 'nodes_to_add': [] }
 
 
     """
@@ -228,35 +228,6 @@ class IPDAgent(CellAgent):
         foafs.discard(self.node)
         return foafs
 
-    def __actually_sever_connections(
-        self,
-        sever_targets: list[int],
-    ) -> set[int]:
-        severed_nodes = set()
-
-        for node in sever_targets:
-            if self.model.debug:
-                print(f"You're dead to me, {node}.")
-
-            self.model.network.remove_connection(
-                self.cell,
-                self.model.node_to_agent[node].cell,
-            )
-            severed_nodes.add(node)
-
-        return severed_nodes
-
-    def __actually_add_new_connections(
-        self,
-        chosen_new_neighbors: list[int],
-    ) -> None:
-        for new_friend_node in chosen_new_neighbors:
-            self.model.network.add_connection(
-                self.cell,
-                self.model.node_to_agent[new_friend_node].cell,
-            )
-            if self.model.debug:
-                print(f"I'm now friends with {new_friend_node}!")
 
     def __is_adjacent_to_node(self, x):
         return any(

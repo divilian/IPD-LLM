@@ -140,7 +140,7 @@ class BrowserAgent(TitForTatAgent):
         """
         tft_noise: passed on to the Tit-for-Tat algorithm.
         patience: the number of consecutive D's by the opponent that this
-        agent will tolerate before severing the connection and going shopping.
+        agent will tolerate before dropping the connection and going shopping.
         """
         super().__init__(model, cell, tft_noise)
         self.patience = patience
@@ -154,20 +154,20 @@ class BrowserAgent(TitForTatAgent):
         BrowserAgent policy: anyone who's defected a lot recently gets the axe.
         Pick random eligible FOAFs as replacements.
         """
-        sever_targets = []
+        drop_targets = []
 
         for node, history in self.history.items():
             if (
                 node in self.model.network.G.neighbors(self.node)
                 and self._has_defected_too_often(history)
-                and len(sever_targets) < max_rewires
+                and len(drop_targets) < max_rewires
             ):
-                sever_targets.append(node)
+                drop_targets.append(node)
 
-        new_targets = self._select_up_to_n_new_targets(len(sever_targets))
-        sever_targets = sever_targets[:len(new_targets)]
+        new_targets = self._select_up_to_n_new_targets(len(drop_targets))
+        drop_targets = drop_targets[:len(new_targets)]
 
-        return { 'nodes_to_sever': sever_targets, 'nodes_to_add': new_targets }
+        return { 'nodes_to_drop': drop_targets, 'nodes_to_add': new_targets }
 
     def _select_up_to_n_new_targets(self, n: int):
 
