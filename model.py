@@ -237,14 +237,12 @@ class IPDModel(Model):
         adds = set()
 
         for agent, r in requests_by_agent.items():
-            if 'nodes_to_drop' not in r:
-                import ipdb ; ipdb.set_trace()
             drop_nodes = tuple(sorted(r["nodes_to_drop"]))
             add_nodes = tuple(sorted(r["nodes_to_add"]))
 
             # this takes the first n in case lengths dont match
-            n = min(len(sever_nodes), len(add_nodes), self.max_rewires)
-            sever_nodes = sever_nodes[:n]
+            n = min(len(drop_nodes), len(add_nodes), self.max_rewires)
+            drop_nodes = drop_nodes[:n]
             add_nodes = add_nodes[:n]
  
             for s in drop_nodes:
