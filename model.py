@@ -239,6 +239,11 @@ class IPDModel(Model):
         for agent, r in requests_by_agent.items():
             sever_nodes = tuple(sorted(r["nodes_to_sever"]))
             add_nodes = tuple(sorted(r["nodes_to_add"]))
+
+            # this takes the first n in case lengths dont match
+            n = min(len(sever_nodes), len(add_nodes), self.max_rewires)
+            sever_nodes = sever_nodes[:n]
+            add_nodes = add_nodes[:n]
  
             for s in sever_nodes:
                 if snapshot.has_edge(agent.node, s):
