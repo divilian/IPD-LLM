@@ -264,8 +264,8 @@ class IPDModel(Model):
             cell1.disconnect(cell2)
 
         for add in adds:
-            cell1 = self.network[sever[0]]
-            cell2 = self.network[sever[1]]
+            cell1 = self.network[add[0]]
+            cell2 = self.network[add[1]]
             cell1.connect(cell2)
 
     def is_foaf(self, G, u, v):
