@@ -51,7 +51,7 @@ class StudentLLMTemplate(LLMAgent):
         Keep this fairly short. Put most of your strategy-specific instructions
         in build_decision_prompt() and build_rewiring_prompt().
         """
-        raise NotImplementedError
+        return ""
 
     def build_decision_prompt(
         self,
@@ -67,7 +67,10 @@ class StudentLLMTemplate(LLMAgent):
         - Should it forgive sometimes?
         - How should it use the number of remaining turns?
         """
-        raise NotImplementedError
+        return """
+            Output exactly this JSON document:
+            {'move':'C'}
+        """
 
     def build_rewiring_prompt(
         self,
