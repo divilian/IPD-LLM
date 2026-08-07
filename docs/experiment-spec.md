@@ -351,6 +351,8 @@ The LLM must not be assumed to remember:
 - past reports;
 - previous simulation rounds.
 
+Receiving a valid reputation request is an observable event for the informant. The simulator must retain the fact that the request occurred as part of the informant's simulator-managed observable history, including in Condition 3 when the mandatory truthful response is supplied by the simulator without an LLM inference call. The exact representation and amount of received-request history supplied in later LLM prompts must be frozen during prompt design before the full experiment.
+
 ### 8.2 Information supplied to the LLM
 
 Depending on the decision phase and condition, an LLM prompt may include:
@@ -926,7 +928,13 @@ For each directed action, the simulator records:
 
 ### 14.4 Rule-based action policies
 
-Always Cooperate, Always Defect, Tit-for-Tat, Grim Trigger, and Win-Stay, Lose-Shift must have concise mathematical or algorithmic definitions.
+The five classical rule-based action policies are defined per opponent as follows:
+
+- **Always Cooperate:** choose C on every interaction.
+- **Always Defect:** choose D on every interaction.
+- **Tit-for-Tat:** choose C on the first interaction with an opponent; thereafter choose the action that opponent chose in the immediately preceding interaction with the actor.
+- **Grim Trigger:** choose C until the opponent has chosen D at least once in its direct history with the actor; thereafter choose D against that opponent permanently.
+- **Win-Stay, Lose-Shift (Pavlov):** use the memory-one rule below.
 
 Win-Stay, Lose-Shift (Pavlov) is initialized with cooperation. Ordered by the previous outcome from the actor’s perspective as $CC$, $CD$, $DC$, and $DD$, its memory-one cooperation vector is:
 
@@ -1606,6 +1614,7 @@ The following decisions must be settled before the specification is considered f
 | Principal corruption probability $\alpha$ | Unresolved pending calibration |
 | New-partner evaluation horizon $h$ | Unresolved pending calibration |
 | LLM call granularity | Provisional phase-specific design; finalize after pilot benchmarking |
+| Presentation of received-request history to LLM | Unresolved pending prompt design |
 | Retry and fallback policy | Recommendations given; not frozen |
 | Whether fallback refusal incurs refusal cost | Unresolved |
 | Run-failure threshold | Unresolved |
