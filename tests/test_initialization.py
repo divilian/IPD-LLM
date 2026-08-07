@@ -1,3 +1,5 @@
+from dataclasses import fields
+
 import networkx as nx
 
 from ipd_llm.agents import AgentSpec
@@ -53,7 +55,7 @@ def test_same_seed_reproduces_graph_and_placement():
     assert policy_types(first) == policy_types(second)
 
 
-def test_initialization_uses_separate_stream_seeds():
+def test_initialization_contains_only_realized_state():
     initialization = create_initialization(
         seed=12345,
         agent_specs=specs(),
@@ -61,7 +63,27 @@ def test_initialization_uses_separate_stream_seeds():
         p=0.25,
     )
 
-    assert initialization.graph_seed != initialization.placement_seed
+    assert [field.name for field in fields(initialization)] == [
+        "graph",
+        "node_to_spec",
+    ]
+
+
+def test_placement_is_independent_of_graph_generation():
+    first = create_initialization(
+        seed=12345,
+        agent_specs=specs(),
+        k=2,
+        p=0.0,
+    )
+    second = create_initialization(
+        seed=12345,
+        agent_specs=specs(),
+        k=4,
+        p=1.0,
+    )
+
+    assert policy_types(first) == policy_types(second)
 
 
 def test_initial_graph_is_connected():

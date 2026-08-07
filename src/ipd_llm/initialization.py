@@ -14,9 +14,6 @@ from ipd_llm.rng import derive_seed
 class Initialization:
     """One reusable graph and agent placement."""
 
-    seed: int
-    graph_seed: int
-    placement_seed: int
     graph: nx.Graph
     node_to_spec: dict[int, AgentSpec]
 
@@ -54,9 +51,6 @@ def create_initialization(
     )
 
     return Initialization(
-        seed=seed,
-        graph_seed=graph_seed,
-        placement_seed=placement_seed,
         graph=graph,
         node_to_spec=node_to_spec,
     )
