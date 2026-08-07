@@ -1,15 +1,27 @@
 """Mesa model for networked Iterated Prisoner's Dilemma."""
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import networkx as nx
 from mesa import Model
 
 from ipd_llm.agents import AgentSpec, IPDAgent
-from ipd_llm.records import InteractionRecord
+from ipd_llm.records import InteractionRecord, append_records
 from ipd_llm.game import PayoffMatrix, resolve_interaction
-from ipd_llm.initialization import Initialization
-from ipd_llm.policies import Action, Interaction
+from ipd_llm.initialization import (
+    Initialization,
+    create_initialization,
+)
+from ipd_llm.policies import (
+    Action,
+    AlwaysCooperate,
+    AlwaysDefect,
+    GrimTrigger,
+    Interaction,
+    Pavlov,
+    TitForTat,
+)
 
 
 class IPDModel(Model):
@@ -135,3 +147,59 @@ class IPDModel(Model):
                     second_payoff=second_payoff,
                 )
             )
+
+
+def run_smoke_test(
+    output_path: str | Path,
+    rounds: int = 5,
+) -> IPDModel:
+    """Run a small deterministic simulation and persist its records."""
+
+    agent_specs = [
+        AgentSpec(AlwaysCooperate()),
+        AgentSpec(AlwaysDefect()),
+        AgentSpec(TitForTat()),
+        AgentSpec(GrimTrigger()),
+        AgentSpec(Pavlov()),
+        AgentSpec(AlwaysCooperate()),
+        AgentSpec(AlwaysDefect()),
+        AgentSpec(TitForTat()),
+    ]
+    initialization = create_initialization(
+        seed=12345,
+        agent_specs=agent_specs,
+        k=4,
+        p=0.25,
+    )
+    payoff_matrix = PayoffMatrix(
+        temptation=5,
+        reward=3,
+        punishment=1,
+        sucker=0,
+    )
+    model = IPDModel.from_initialization(
+        initialization,
+        payoff_matrix,
+    )
+
+    for _ in range(rounds):
+        model.step()
+
+    append_records(output_path, model.records)
+    return model
+
+
+def main() -> None:
+    """Run the smoke test and write records for inspection."""
+
+    output_path = Path("smoke-records.jsonl")
+    model = run_smoke_test(output_path)
+
+    print(
+        f"Wrote {len(model.records)} interaction records "
+        f"to {output_path}"
+    )
+
+
+if __name__ == "__main__":
+    main()
