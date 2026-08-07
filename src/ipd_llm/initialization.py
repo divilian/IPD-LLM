@@ -2,12 +2,12 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-import hashlib
 import random
 
 import networkx as nx
 
 from ipd_llm.agents import AgentSpec
+from ipd_llm.rng import derive_seed
 
 
 @dataclass(frozen=True)
@@ -21,14 +21,6 @@ class Initialization:
     node_to_spec: dict[int, AgentSpec]
 
 
-def _derive_seed(seed: int, stream: str) -> int:
-    """Derive one stable 64-bit stream seed."""
-
-    data = f"{seed}:{stream}".encode("utf-8")
-    digest = hashlib.sha256(data).digest()
-    return int.from_bytes(digest[:8], byteorder="big")
-
-
 def create_initialization(
     seed: int,
     agent_specs: Sequence[AgentSpec],
@@ -37,8 +29,8 @@ def create_initialization(
 ) -> Initialization:
     """Create a reproducible connected Watts-Strogatz initialization."""
 
-    graph_seed = _derive_seed(seed, "graph")
-    placement_seed = _derive_seed(seed, "placement")
+    graph_seed = derive_seed(seed, "graph")
+    placement_seed = derive_seed(seed, "placement")
 
     graph_rng = random.Random(graph_seed)
     placement_rng = random.Random(placement_seed)
