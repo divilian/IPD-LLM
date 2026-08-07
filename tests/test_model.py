@@ -3,6 +3,7 @@ import pytest
 
 from ipd_llm.agents import AgentSpec
 from ipd_llm.game import PayoffMatrix
+from ipd_llm.initialization import create_initialization
 from ipd_llm.model import IPDModel
 from ipd_llm.policies import (
     Action,
@@ -214,3 +215,44 @@ def test_model_handles_watts_strogatz_graph():
 
         assert len(first_history) == 1
         assert len(second_history) == 1
+
+
+def test_model_can_reuse_saved_initialization():
+    agent_specs = [
+        spec(AlwaysCooperate()),
+        spec(AlwaysDefect()),
+        spec(TitForTat()),
+        spec(AlwaysCooperate()),
+        spec(AlwaysDefect()),
+        spec(TitForTat()),
+        spec(AlwaysCooperate()),
+        spec(AlwaysDefect()),
+    ]
+    initialization = create_initialization(
+        seed=24680,
+        agent_specs=agent_specs,
+        k=4,
+        p=0.25,
+    )
+
+    first = IPDModel.from_initialization(
+        initialization,
+        PAYOFFS,
+    )
+    second = IPDModel.from_initialization(
+        initialization,
+        PAYOFFS,
+    )
+
+    assert set(first.graph.edges) == set(second.graph.edges)
+
+    first_types = {
+        node: type(agent.spec.action_policy)
+        for node, agent in first.node_to_agent.items()
+    }
+    second_types = {
+        node: type(agent.spec.action_policy)
+        for node, agent in second.node_to_agent.items()
+    }
+
+    assert first_types == second_types

@@ -7,6 +7,7 @@ from mesa import Model
 
 from ipd_llm.agents import AgentSpec, IPDAgent
 from ipd_llm.game import PayoffMatrix, resolve_interaction
+from ipd_llm.initialization import Initialization
 from ipd_llm.policies import Action, Interaction
 
 
@@ -39,6 +40,26 @@ class IPDModel(Model):
             agent = IPDAgent(self, node, spec)
             self.node_to_agent[node] = agent
             self.agent_to_node[agent] = node
+
+    @classmethod
+    def from_initialization(
+        cls,
+        initialization: Initialization,
+        payoff_matrix: PayoffMatrix,
+    ) -> "IPDModel":
+        """Build a model from one saved initialization."""
+
+        nodes = sorted(initialization.graph.nodes)
+        agent_specs = [
+            initialization.node_to_spec[node]
+            for node in nodes
+        ]
+
+        return cls(
+            initialization.graph,
+            agent_specs,
+            payoff_matrix,
+        )
 
     def step(self) -> None:
         """Run one fixed-network simulation round."""
