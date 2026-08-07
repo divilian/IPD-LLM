@@ -5,9 +5,9 @@ from collections.abc import Sequence
 import networkx as nx
 from mesa import Model
 
-from ipd_llm.agents import IPDAgent
+from ipd_llm.agents import AgentSpec, IPDAgent
 from ipd_llm.game import PayoffMatrix, resolve_interaction
-from ipd_llm.policies import Action, ActionPolicy, Interaction
+from ipd_llm.policies import Action, Interaction
 
 
 class IPDModel(Model):
@@ -16,14 +16,14 @@ class IPDModel(Model):
     def __init__(
         self,
         graph: nx.Graph,
-        action_policies: Sequence[ActionPolicy],
+        agent_specs: Sequence[AgentSpec],
         payoff_matrix: PayoffMatrix,
     ) -> None:
         super().__init__()
 
-        if graph.number_of_nodes() != len(action_policies):
+        if graph.number_of_nodes() != len(agent_specs):
             raise ValueError(
-                "Graph node count must match action policy count."
+                "Graph node count must match agent spec count."
             )
 
         self.graph = graph.copy()
@@ -32,11 +32,11 @@ class IPDModel(Model):
         self.node_to_agent: dict[int, IPDAgent] = {}
         self.agent_to_node: dict[IPDAgent, int] = {}
 
-        for node, policy in zip(
+        for node, spec in zip(
             sorted(self.graph.nodes),
-            action_policies,
+            agent_specs,
         ):
-            agent = IPDAgent(self, node, policy)
+            agent = IPDAgent(self, node, spec)
             self.node_to_agent[node] = agent
             self.agent_to_node[agent] = node
 

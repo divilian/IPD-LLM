@@ -1,6 +1,7 @@
 import networkx as nx
 import pytest
 
+from ipd_llm.agents import AgentSpec
 from ipd_llm.game import PayoffMatrix
 from ipd_llm.model import IPDModel
 from ipd_llm.policies import (
@@ -19,13 +20,17 @@ PAYOFFS = PayoffMatrix(
 )
 
 
+def spec(action_policy) -> AgentSpec:
+    return AgentSpec(action_policy=action_policy)
+
+
 def two_agent_model(first_policy, second_policy) -> IPDModel:
     graph = nx.Graph()
     graph.add_edge(0, 1)
 
     return IPDModel(
         graph,
-        [first_policy, second_policy],
+        [spec(first_policy), spec(second_policy)],
         PAYOFFS,
     )
 
@@ -65,14 +70,17 @@ def test_model_builds_reverse_agent_to_node_mapping():
     assert model.agent_to_node[second] == 1
 
 
-def test_graph_node_count_must_match_policy_count():
+def test_graph_node_count_must_match_agent_spec_count():
     graph = nx.Graph()
     graph.add_nodes_from([0, 1, 2])
 
     with pytest.raises(ValueError):
         IPDModel(
             graph,
-            [AlwaysCooperate(), AlwaysCooperate()],
+            [
+                spec(AlwaysCooperate()),
+                spec(AlwaysCooperate()),
+            ],
             PAYOFFS,
         )
 
@@ -131,9 +139,9 @@ def test_each_edge_generates_one_interaction_per_round():
     model = IPDModel(
         graph,
         [
-            AlwaysCooperate(),
-            AlwaysCooperate(),
-            AlwaysCooperate(),
+            spec(AlwaysCooperate()),
+            spec(AlwaysCooperate()),
+            spec(AlwaysCooperate()),
         ],
         PAYOFFS,
     )
@@ -176,3 +184,33 @@ def test_fixed_network_does_not_change_during_steps():
     model.step()
 
     assert set(model.graph.edges) == initial_edges
+
+
+def test_model_handles_watts_strogatz_graph():
+    graph = nx.watts_strogatz_graph(
+        n=12,
+        k=4,
+        p=0.25,
+        seed=12345,
+    )
+    model = IPDModel(
+        graph,
+        [
+            spec(AlwaysCooperate())
+            for _ in graph.nodes
+        ],
+        PAYOFFS,
+    )
+
+    model.step()
+
+    for first_node, second_node in graph.edges:
+        first_history = model.node_to_agent[first_node].history_with(
+            second_node
+        )
+        second_history = model.node_to_agent[second_node].history_with(
+            first_node
+        )
+
+        assert len(first_history) == 1
+        assert len(second_history) == 1

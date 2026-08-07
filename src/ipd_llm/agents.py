@@ -1,8 +1,17 @@
 """Mesa agent state and direct interaction histories."""
 
+from dataclasses import dataclass
+
 from mesa import Agent, Model
 
 from ipd_llm.policies import Action, ActionPolicy, History, Interaction
+
+
+@dataclass(frozen=True)
+class AgentSpec:
+    """Policies used to construct one simulator agent."""
+
+    action_policy: ActionPolicy
 
 
 class IPDAgent(Agent):
@@ -12,11 +21,11 @@ class IPDAgent(Agent):
         self,
         model: Model,
         node: int,
-        action_policy: ActionPolicy,
+        spec: AgentSpec,
     ) -> None:
         super().__init__(model)
         self.node = node
-        self.action_policy = action_policy
+        self.spec = spec
         self._histories: dict[int, list[Interaction]] = {}
 
     @property
@@ -33,7 +42,7 @@ class IPDAgent(Agent):
     def choose_action(self, opponent_node: int) -> Action:
         """Choose an action using only direct history with the opponent."""
 
-        return self.action_policy.choose_action(
+        return self.spec.action_policy.choose_action(
             self.history_with(opponent_node)
         )
 

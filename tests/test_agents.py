@@ -1,6 +1,6 @@
 from mesa import Agent, Model
 
-from ipd_llm.agents import IPDAgent
+from ipd_llm.agents import AgentSpec, IPDAgent
 from ipd_llm.policies import (
     Action,
     AlwaysCooperate,
@@ -30,7 +30,11 @@ def make_agent(
     if policy is None:
         policy = AlwaysCooperate()
 
-    return IPDAgent(model, node, policy)
+    return IPDAgent(
+        model,
+        node,
+        AgentSpec(action_policy=policy),
+    )
 
 
 def test_agent_inherits_from_mesa_agent():
