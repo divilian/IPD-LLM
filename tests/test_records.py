@@ -1,7 +1,35 @@
 import json
 
-from ipd_llm.policies import Action
-from ipd_llm.records import InteractionRecord, append_records
+import networkx as nx
+
+from ipd_llm.agents import AgentSpec
+from ipd_llm.initialization import Initialization
+from ipd_llm.policies import (
+    Action,
+    AlwaysCooperate,
+    AlwaysDefect,
+)
+from ipd_llm.records import (
+    InitializationRecord,
+    InteractionRecord,
+    append_records,
+)
+
+
+def initialization_record() -> InitializationRecord:
+    graph = nx.Graph()
+    graph.add_nodes_from([0, 1, 2])
+    graph.add_edges_from([(0, 1), (1, 2)])
+
+    initialization = Initialization(
+        graph=graph,
+        node_to_spec={
+            0: AgentSpec(AlwaysCooperate()),
+            1: AgentSpec(AlwaysDefect()),
+            2: AgentSpec(AlwaysCooperate()),
+        },
+    )
+    return InitializationRecord.from_initialization(initialization)
 
 
 def interaction_record(
@@ -43,6 +71,49 @@ def test_append_records_writes_one_json_object_per_line(tmp_path):
     )
 
     assert len(path.read_text().splitlines()) == 2
+
+
+def test_append_records_serializes_initialization_record(tmp_path):
+    path = tmp_path / "records.jsonl"
+
+    append_records(path, [initialization_record()])
+
+    assert read_json_lines(path) == [
+        {
+            "record_type": "initialization",
+            "nodes": [0, 1, 2],
+            "edges": [[0, 1], [1, 2]],
+            "node_to_spec": {
+                "0": {"action_policy": "always_cooperate"},
+                "1": {"action_policy": "always_defect"},
+                "2": {"action_policy": "always_cooperate"},
+            },
+        }
+    ]
+
+
+def test_initialization_record_captures_realized_state():
+    graph = nx.Graph()
+    graph.add_edge(0, 1)
+    initialization = Initialization(
+        graph=graph,
+        node_to_spec={
+            0: AgentSpec(AlwaysCooperate()),
+            1: AgentSpec(AlwaysDefect()),
+        },
+    )
+
+    record = InitializationRecord.from_initialization(initialization)
+
+    graph.add_edge(1, 2)
+    initialization.node_to_spec[0] = AgentSpec(AlwaysDefect())
+
+    assert record.nodes == (0, 1)
+    assert record.edges == ((0, 1),)
+    assert isinstance(
+        record.node_to_spec[0][1].action_policy,
+        AlwaysCooperate,
+    )
 
 
 def test_append_records_serializes_all_fields(tmp_path):

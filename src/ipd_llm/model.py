@@ -7,7 +7,11 @@ import networkx as nx
 from mesa import Model
 
 from ipd_llm.agents import AgentSpec, IPDAgent
-from ipd_llm.records import InteractionRecord, append_records
+from ipd_llm.records import (
+    InitializationRecord,
+    InteractionRecord,
+    append_records,
+)
 from ipd_llm.game import PayoffMatrix, resolve_interaction
 from ipd_llm.initialization import (
     Initialization,
@@ -185,7 +189,13 @@ def run_smoke_test(
     for _ in range(rounds):
         model.step()
 
-    append_records(output_path, model.records)
+    initialization_record = InitializationRecord.from_initialization(
+        initialization
+    )
+    append_records(
+        output_path,
+        [initialization_record, *model.records],
+    )
     return model
 
 
