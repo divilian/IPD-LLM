@@ -6,6 +6,7 @@ import networkx as nx
 from mesa import Model
 
 from ipd_llm.agents import AgentSpec, IPDAgent
+from ipd_llm.records import InteractionRecord
 from ipd_llm.game import PayoffMatrix, resolve_interaction
 from ipd_llm.initialization import Initialization
 from ipd_llm.policies import Action, Interaction
@@ -30,6 +31,7 @@ class IPDModel(Model):
         self.graph = graph.copy()
         self.payoff_matrix = payoff_matrix
         self.simulation_round = 0
+        self.records: list[InteractionRecord] = []
         self.node_to_agent: dict[int, IPDAgent] = {}
         self.agent_to_node: dict[IPDAgent, int] = {}
 
@@ -120,4 +122,16 @@ class IPDModel(Model):
                     opponent_action=first_action,
                     own_payoff=second_payoff,
                 ),
+            )
+
+            self.records.append(
+                InteractionRecord(
+                    simulation_round=self.simulation_round,
+                    first_node=first_node,
+                    second_node=second_node,
+                    first_action=first_action,
+                    second_action=second_action,
+                    first_payoff=first_payoff,
+                    second_payoff=second_payoff,
+                )
             )

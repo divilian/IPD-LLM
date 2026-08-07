@@ -256,3 +256,78 @@ def test_model_can_reuse_saved_initialization():
     }
 
     assert first_types == second_types
+
+
+def test_each_edge_generates_one_interaction_record_per_round():
+    graph = nx.complete_graph(3)
+    model = IPDModel(
+        graph,
+        [
+            spec(AlwaysCooperate()),
+            spec(AlwaysCooperate()),
+            spec(AlwaysCooperate()),
+        ],
+        PAYOFFS,
+    )
+
+    model.step()
+
+    assert len(model.records) == graph.number_of_edges()
+
+
+def test_interaction_record_records_both_sides_atomically():
+    model = two_agent_model(
+        AlwaysCooperate(),
+        AlwaysDefect(),
+    )
+
+    model.step()
+
+    record = model.records[0]
+
+    assert record.simulation_round == 1
+    assert record.first_node == 0
+    assert record.second_node == 1
+    assert record.first_action == Action.COOPERATE
+    assert record.second_action == Action.DEFECT
+    assert record.first_payoff == 0
+    assert record.second_payoff == 5
+
+
+def test_interaction_records_accumulate_across_rounds():
+    model = two_agent_model(
+        AlwaysCooperate(),
+        AlwaysDefect(),
+    )
+
+    model.step()
+    model.step()
+
+    assert len(model.records) == 2
+    assert [record.simulation_round for record in model.records] == [1, 2]
+
+
+def test_interaction_record_matches_both_agent_histories():
+    model = two_agent_model(
+        AlwaysCooperate(),
+        AlwaysDefect(),
+    )
+
+    model.step()
+
+    record = model.records[0]
+    first = model.node_to_agent[record.first_node].history_with(
+        record.second_node
+    )[0]
+    second = model.node_to_agent[record.second_node].history_with(
+        record.first_node
+    )[0]
+
+    assert record.simulation_round == first.simulation_round
+    assert record.simulation_round == second.simulation_round
+    assert record.first_action == first.own_action
+    assert record.second_action == first.opponent_action
+    assert record.second_action == second.own_action
+    assert record.first_action == second.opponent_action
+    assert record.first_payoff == first.own_payoff
+    assert record.second_payoff == second.own_payoff
