@@ -7,7 +7,7 @@ name = "ipd-llm"
 version = "0.1.0"
 description = "Simulator for LLMs in Networked Iterated Prisoner's Dilemma"
 requires-python = ">=3.12"
-dependencies = ["mesa==3.5.1"]
+dependencies = ["mesa==3.5.1", "networkx"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
